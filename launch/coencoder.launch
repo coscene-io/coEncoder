@@ -1,0 +1,10 @@
+<launch>
+    <node name="coencoder" pkg="coencoder" type="coencoder" output="screen">
+      <rosparam param="topics">['/camera_1', '/camera_2', '/camera_3']</rosparam>
+      <rosparam param="resolutions">['1600*900','2592*1944','1600*900']</rosparam>
+      <param name="output_fps"          value="20"/>
+      <param name="bitrate"             value="400000"/>
+    </node>
+</launch>
+
+

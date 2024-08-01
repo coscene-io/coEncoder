@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>coencoder</name>
+  <version>0.0.1</version>
+  <description>The coencoder package</description>
+  <maintainer email="coscene@coscene.io">coffee</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>foxglove_msgs</build_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>opencv</build_depend>
+  <build_depend>libavformat-dev</build_depend>
+  <build_depend>libavcodec-dev</build_depend>
+  <build_depend>libavutil-dev</build_depend>
+
+  <build_export_depend>foxglove_msgs</build_export_depend>
+  <build_export_depend>roscpp</build_export_depend>
+  <build_export_depend>sensor_msgs</build_export_depend>
+  <build_export_depend>libavformat-dev</build_export_depend>
+  <build_export_depend>libavcodec-dev</build_export_depend>
+  <build_export_depend>libavutil-dev</build_export_depend>
+
+  <exec_depend>foxglove_msgs</exec_depend>
+  <exec_depend>roscpp</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>opencv</exec_depend>
+  <exec_depend>libavformat-dev</exec_depend>
+  <exec_depend>libavcodec-dev</exec_depend>
+  <exec_depend>libavutil-dev</exec_depend>
+
+
+
+  <!-- The export tag contains other, unspecified, tags -->
+  <export>
+    <!-- Other tools can request additional information be placed here -->
+
+  </export>
+</package>
