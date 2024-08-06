@@ -120,11 +120,17 @@ public:
             video_msg.data.assign(pkt.data, pkt.data + pkt.size);
             video_msg.format = "h264";
 
-//            ROS_INFO("encoded size: %d, %02x %02x %02x %02x   %02x %02x %02x %02x   %02x %02x %02x %02x   %02x %02x %02x %02x", pkt.size,
-//                     pkt.data[0], pkt.data[1], pkt.data[2], pkt.data[3],
-//                     pkt.data[4], pkt.data[5], pkt.data[6], pkt.data[7],
-//                     pkt.data[8], pkt.data[9], pkt.data[10], pkt.data[11],
-//                     pkt.data[12], pkt.data[13], pkt.data[14], pkt.data[15]);
+//            if (pts_ < 15){
+//                ROS_INFO("pkg size: %zu", pkt.size);
+//                std::ofstream file("/home/coffee/video_1_b_frame.h264", std::ios::out | std::ios::binary | std::ios::app);
+//                if (!file) {
+//                    std::cerr << "can't open file" << std::endl;
+//                    return nullptr;
+//                }
+//                file.write(reinterpret_cast<const char*>(pkt.data), pkt.size);
+//                file.close();
+//            }
+
             av_packet_unref(&pkt);
             return boost::make_shared<foxglove_msgs::CompressedVideo>(video_msg);
         }
