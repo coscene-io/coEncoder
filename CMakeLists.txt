@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Find catkin packages and dependencies
 find_package(catkin REQUIRED COMPONENTS
         roscpp
+        std_srvs
         sensor_msgs
         foxglove_msgs
 )
@@ -29,7 +30,7 @@ endif()
 
 # Declare catkin package
 catkin_package(
-        CATKIN_DEPENDS roscpp sensor_msgs foxglove_msgs
+        CATKIN_DEPENDS roscpp std_srvs sensor_msgs foxglove_msgs
 )
 
 include_directories(

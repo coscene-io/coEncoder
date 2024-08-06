@@ -9,6 +9,7 @@
   <buildtool_depend>catkin</buildtool_depend>
   <build_depend>foxglove_msgs</build_depend>
   <build_depend>roscpp</build_depend>
+  <build_depend>std_srvs</build_depend>
   <build_depend>sensor_msgs</build_depend>
   <build_depend>opencv</build_depend>
   <build_depend>libavformat-dev</build_depend>
@@ -17,6 +18,7 @@
 
   <build_export_depend>foxglove_msgs</build_export_depend>
   <build_export_depend>roscpp</build_export_depend>
+  <build_export_depend>std_srvs</build_export_depend>
   <build_export_depend>sensor_msgs</build_export_depend>
   <build_export_depend>libavformat-dev</build_export_depend>
   <build_export_depend>libavcodec-dev</build_export_depend>
@@ -24,6 +26,7 @@
 
   <exec_depend>foxglove_msgs</exec_depend>
   <exec_depend>roscpp</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>opencv</exec_depend>
   <exec_depend>libavformat-dev</exec_depend>
