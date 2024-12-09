@@ -1,43 +1,31 @@
 <?xml version="1.0"?>
-<package format="2">
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>coencoder</name>
-  <version>0.0.1</version>
-  <description>The coencoder package</description>
-  <maintainer email="coscene@coscene.io">coffee</maintainer>
-  <license>Apache License 2.0</license>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="fei.gao@coscene.io">fei</maintainer>
+  <license>Apache-2.0</license>
 
-  <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>foxglove_msgs</build_depend>
-  <build_depend>roscpp</build_depend>
-  <build_depend>std_srvs</build_depend>
-  <build_depend>sensor_msgs</build_depend>
-  <build_depend>opencv</build_depend>
-  <build_depend>libavformat-dev</build_depend>
-  <build_depend>libavcodec-dev</build_depend>
-  <build_depend>libavutil-dev</build_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <build_export_depend>foxglove_msgs</build_export_depend>
-  <build_export_depend>roscpp</build_export_depend>
-  <build_export_depend>std_srvs</build_export_depend>
-  <build_export_depend>sensor_msgs</build_export_depend>
-  <build_export_depend>libavformat-dev</build_export_depend>
-  <build_export_depend>libavcodec-dev</build_export_depend>
-  <build_export_depend>libavutil-dev</build_export_depend>
+  <depend>rclcpp</depend>v
+  <depend>sensor_msgs</depend>
+  <depend>foxglove_msgs</depend>
+  <depend>yolo_msgs</depend>
+  <depend>image_transport</depend>
+  <depend>cv_bridge</depend>
+  <depend>OpenCV</depend>
 
-  <exec_depend>foxglove_msgs</exec_depend>
-  <exec_depend>roscpp</exec_depend>
-  <exec_depend>std_srvs</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend>
-  <exec_depend>opencv</exec_depend>
   <exec_depend>libavformat-dev</exec_depend>
   <exec_depend>libavcodec-dev</exec_depend>
   <exec_depend>libavutil-dev</exec_depend>
+  <exec_depend>libswscale-dev</exec_depend>
 
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
 
-
-  <!-- The export tag contains other, unspecified, tags -->
   <export>
-    <!-- Other tools can request additional information be placed here -->
-
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

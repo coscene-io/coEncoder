@@ -1,0 +1,11 @@
+<launch>
+    <arg name="topic" default="/camera"/>
+    <arg name="image_width" default="640" />
+    <arg name="image_height" default="480" />
+
+    <node pkg="coencoder" exec="coencoder">
+        <param name="topic" value="$(var topic)" />
+        <param name="image_width" value="$(var image_width)" />
+        <param name="image_height" value="$(var image_height)" />
+    </node>
+</launch>

@@ -14,12 +14,9 @@
 // limitations under the License.
 //////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ROS1_WS_ENCODER_HPP
-#define ROS1_WS_ENCODER_HPP
-
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 #include <opencv2/opencv.hpp>
-#include <foxglove_msgs/CompressedVideo.h>
+#include <foxglove_msgs/msg/compressed_video.hpp>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -35,23 +32,22 @@ public:
     }
 
     H264Encoder(int width, int height, int bitrate, int fps) {
+        RCLCPP_ERROR(rclcpp::get_logger("H264Encoder"), "H264Encoder constructor");
         codec_ = avcodec_find_encoder(AV_CODEC_ID_H264);
         if (!codec_) {
-            ROS_ERROR("H.264 codec not found");
-            ros::shutdown();
+            throw std::runtime_error("H.264 codec not found");
         }
 
         codec_context_ = avcodec_alloc_context3(codec_);
         if (!codec_context_) {
-            ROS_ERROR("Could not allocate video codec context");
-            ros::shutdown();
+            throw std::runtime_error("Could not allocate video codec context");
         }
 
         codec_context_->bit_rate = bitrate;
         codec_context_->width = width;
         codec_context_->height = height;
         codec_context_->time_base = {1, fps};
-        codec_context_->framerate = (AVRational) {fps, 1};
+        codec_context_->framerate = AVRational{fps, 1};
         codec_context_->gop_size = 10;
         codec_context_->max_b_frames = 0;
         codec_context_->pix_fmt = AV_PIX_FMT_YUV420P;
@@ -60,33 +56,48 @@ public:
         av_dict_set(&codecOpts, "tune", "zerolatency", 0);
         av_dict_set(&codecOpts, "preset", "ultrafast", 0);
 
+        RCLCPP_ERROR(rclcpp::get_logger("H264Encoder"), "open avcodec_open2");
         if (avcodec_open2(codec_context_, codec_, &codecOpts) < 0) {
-            ROS_ERROR("Could not open codec");
-            ros::shutdown();
+            RCLCPP_ERROR(rclcpp::get_logger("H264Encoder"), "Could not open codec");
+            throw std::runtime_error("Could not open codec");
         }
 
+        RCLCPP_ERROR(rclcpp::get_logger("H264Encoder"), "allocate video frame");
         frame_ = av_frame_alloc();
         if (!frame_) {
-            ROS_ERROR("Could not allocate video frame");
-            ros::shutdown();
+            RCLCPP_ERROR(rclcpp::get_logger("H264Encoder"), "Could not allocate video frame");
+            throw std::runtime_error("Could not allocate video frame");
         }
 
         frame_->format = codec_context_->pix_fmt;
         frame_->width = codec_context_->width;
         frame_->height = codec_context_->height;
 
-        av_image_alloc(frame_->data, frame_->linesize, codec_context_->width,
-                       codec_context_->height, codec_context_->pix_fmt, 32);
+        RCLCPP_ERROR(rclcpp::get_logger("H264Encoder"), "allocate video frame: %d x %d",
+                     codec_context_->width, codec_context_->height);
 
+        int ret = av_image_alloc(frame_->data, frame_->linesize, codec_context_->width,
+                                 codec_context_->height, codec_context_->pix_fmt, 32);
+        if (ret < 0) {
+            RCLCPP_ERROR(rclcpp::get_logger("H264Encoder"), "Could not allocate raw picture buffer.");
+            throw std::runtime_error("Could not allocate raw picture buffer");
+        }
+
+        RCLCPP_ERROR(rclcpp::get_logger("H264Encoder"), "constructor ended.");
     }
 
     ~H264Encoder() {
-        avcodec_free_context(&codec_context_);
-        av_frame_free(&frame_);
-        av_freep(&frame_->data[0]);
+        if (frame_) {
+            av_freep(&frame_->data[0]);  // 释放分配的帧数据
+            av_frame_free(&frame_);     // 释放帧结构
+        }
+        if (codec_context_) {
+            avcodec_free_context(&codec_context_);  // 释放编解码器上下文
+        }
     }
 
     void send_frame(const cv::Mat &img) {
+        RCLCPP_ERROR(rclcpp::get_logger("H264Encoder"), "send_frame. %d x %d, context : %d x %d", img.cols, img.rows, codec_context_->width, codec_context_->height);
         received_ = true;
         std::lock_guard<std::mutex> lock(mutex_);
         int y_size = codec_context_->width * codec_context_->height;
@@ -97,10 +108,11 @@ public:
         memcpy(frame_->data[2], img.data + y_size + uv_size, uv_size);
     }
 
-    foxglove_msgs::CompressedVideoPtr encode_frame() {
+    foxglove_msgs::msg::CompressedVideo::SharedPtr encode_frame() {
+        RCLCPP_ERROR(rclcpp::get_logger("H264Encoder"), "encode_frame.");
         if (!received_) return nullptr;
         AVPacket pkt;
-        av_init_packet(&pkt);
+        //av_init_packet(&pkt);
         pkt.data = nullptr;
         pkt.size = 0;
 
@@ -108,14 +120,13 @@ public:
         frame_->pts = pts_++;
         int ret = avcodec_send_frame(codec_context_, frame_);
         if (ret < 0) {
-            ROS_ERROR("Error sending frame for encoding");
             return nullptr;
         }
 
         ret = avcodec_receive_packet(codec_context_, &pkt);
         if (ret == 0) {
-            auto video_msg = foxglove_msgs::CompressedVideo();
-            video_msg.timestamp = ros::Time::now();
+            auto video_msg = foxglove_msgs::msg::CompressedVideo();
+//            video_msg.timestamp = 0;
             video_msg.frame_id = "camera_frame";
             video_msg.data.assign(pkt.data, pkt.data + pkt.size);
             video_msg.format = "h264";
@@ -132,7 +143,7 @@ public:
 //            }
 
             av_packet_unref(&pkt);
-            return boost::make_shared<foxglove_msgs::CompressedVideo>(video_msg);
+            return std::make_shared<foxglove_msgs::msg::CompressedVideo>(video_msg);
         }
         return nullptr;
     }
@@ -147,7 +158,6 @@ private:
 
     int64_t pts_ = 0;
 
-    std::atomic<bool> received_ = false;
+    std::atomic<bool> received_{false};
 };
 
-#endif //ROS1_WS_ENCODER_HPP
