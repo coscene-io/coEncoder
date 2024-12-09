@@ -106,6 +106,7 @@ public:
                                                      publisher_map_[pub_topic + "/h264"].publish(frame);
                                                  }
                                              }, false, false);
+                timer.start();
                 timer_map_.emplace(pub_topic, timer);
             }
         }
