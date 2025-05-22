@@ -38,8 +38,8 @@ Edit the configuration parameters in the launch file (`coencoder/launch/coencode
     </launch>
     ```
 
-- `/coencoder/subscribe_topics`: Specify one or more topics for H264 encoding. The topics' message types must be `sensor_msgs/CompressedImage` or `sensor_msgs/Image`.
-- `/coencoder/video_resolutions`: Specify the resolution for each topic. Ensure a one-to-one correspondence with `subscribe_topics`.
+- `subscribe_topics`: Specify one or more topics for H264 encoding. The topic's message types must be `sensor_msgs/CompressedImage` or `sensor_msgs/Image`.
+- `video_resolutions`: Specify the resolution for each topic. Ensure a one-to-one correspondence with `subscribe_topics`.
 
 ## Compile
 
@@ -50,7 +50,9 @@ Edit the configuration parameters in the launch file (`coencoder/launch/coencode
     
     # Source ROS setup and build
     source /opt/ros/{ros_distro}/setup.bash
+  
     cd {your_ros_ws}
+  
     catkin_make --pkg coencoder install
     ```
 - ROS2
