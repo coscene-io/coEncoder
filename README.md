@@ -7,8 +7,8 @@
 - Have ROS 1 on your system
 
 ```bash
-sudo apt install libavcodec-dev
-sudo apt install libopencv-dev
+sudo apt install libavformat-dev libswscale-dev libopencv-dev ros-noetic-foxglove-msgs -y
+
 ```
 
 ## Configuration
