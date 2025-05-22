@@ -150,23 +150,18 @@ private:
   static cv::Mat convertToCvMat(const sensor_msgs::Image & img_msg)
   {
     int cv_type = CV_8UC3;
-    switch (img_msg.encoding) {
-      case sensor_msgs::Image::BGR8:
-      case sensor_msgs::Image::RGB8:
-        cv_type = CV_8UC3;
-        break;
-      case sensor_msgs::Image::MONO8:
-      case sensor_msgs::Image::TYPE_8UC1:
-        cv_type = CV_8UC1;
-        break;
-      case sensor_msgs::Image::TYPE_16UC1:
-        cv_type = CV_16UC1;
-        break;
-      default:
-        ROS_ERROR("Unsupported encoding type: %s", img_msg.encoding.c_str());
-        return {};  // Return an empty Mat in case of unsupported encoding
+    std::string encoding = img_msg.encoding;
+    if (encoding == "bgr8" || encoding == "rgb8") {
+      cv_type = CV_8UC3;
+    } else if (encoding == "bgra8" || encoding == "rgba8") {
+      cv_type = CV_8UC4;
+    } else if (encoding == "mono8") {
+      cv_type = CV_8UC1;
+    } else if (encoding == "16UC1") {
+      cv_type = CV_16UC1;
+    } else {
+      throw std::runtime_error("Unsupported encoding type: " + encoding);
     }
-
 
     cv::Mat image(img_msg.height, img_msg.width, cv_type, const_cast<uchar *>(img_msg.data.data()),
       img_msg.step);
