@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
+#include <string>
+#include <memory>
+#include <map>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
@@ -22,19 +26,21 @@
 #include <std_srvs/srv/set_bool.h>
 #include <std_srvs/srv/set_bool.hpp>
 #include "encoder.hpp"
-#include <atomic>
 
 class CoEncoder : public rclcpp::Node
 {
 public:
-  CoEncoder() : Node("coencoder")
+  CoEncoder()
+  : Node("coencoder")
   {
     this->declare_parameter("output_fps", 30);
     this->declare_parameter("bitrate", 800000);
-    this->declare_parameter<std::vector<std::string>>("subscribe_topics",
-                                                      std::vector<std::string>{});
-    this->declare_parameter<std::vector<std::string>>("video_resolutions",
-                                                      std::vector<std::string>{});
+    this->declare_parameter<std::vector<std::string>>(
+      "subscribe_topics",
+      std::vector<std::string>{});
+    this->declare_parameter<std::vector<std::string>>(
+      "video_resolutions",
+      std::vector<std::string>{});
 
     this->get_parameter_or("output_fps", output_fps_, 30);
     this->get_parameter_or("bitrate", bitrate_, 800000);
@@ -48,10 +54,11 @@ public:
       throw std::runtime_error("Failed to get param 'video_resolutions'");
     }
 
-    RCLCPP_INFO(this->get_logger(),
-                "[ros2 constructor] output_fps: %d, bitrate: %d, topics: %s, resolutions: %s",
-                output_fps_, bitrate_, format_topics(sub_topics_).c_str(),
-                format_topics(resolutions_).c_str());
+    RCLCPP_INFO(
+      this->get_logger(),
+      "[ros2 constructor] output_fps: %d, bitrate: %d, topics: %s, resolutions: %s",
+      output_fps_, bitrate_, format_topics(sub_topics_).c_str(),
+      format_topics(resolutions_).c_str());
 
     auto topic_infos = this->get_topic_names_and_types();
     RCLCPP_INFO(this->get_logger(), "topic count: %zu", topic_infos.size());
@@ -84,9 +91,10 @@ public:
       publisher_map_.emplace(pub_topic, pub);
 
       try {
-        encoder_map_.emplace(std::piecewise_construct,
-                             std::forward_as_tuple(pub_topic),
-                             std::forward_as_tuple(width, height, bitrate_, output_fps_));
+        encoder_map_.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(pub_topic),
+          std::forward_as_tuple(width, height, bitrate_, output_fps_));
       } catch (const std::exception & e) {
         RCLCPP_ERROR(this->get_logger(), "create encoder failed: %s", e.what());
         continue;
@@ -99,7 +107,8 @@ public:
           [this, pub_topic]()
           {
             if (encoding_enabled_ && encoder_map_.find(pub_topic) != encoder_map_.end() &&
-              publisher_map_.find(pub_topic) != publisher_map_.end()) {
+            publisher_map_.find(pub_topic) != publisher_map_.end())
+            {
               try {
                 auto frame = encoder_map_[pub_topic].encode_frame();
                 if (frame) {
@@ -134,8 +143,9 @@ public:
           });
         image_sub_.emplace_back(img_sub);
       } else if (topic_type == "sensor_msgs/msg/CompressedImage") {
-        RCLCPP_INFO(this->get_logger(), "create CompressedImage subscriber for topic '%s'",
-                    topic.c_str());
+        RCLCPP_INFO(
+          this->get_logger(), "create CompressedImage subscriber for topic '%s'",
+          topic.c_str());
         auto comp_sub = this->create_subscription<sensor_msgs::msg::CompressedImage>(
           topic, 10,
           [this, pub_topic](sensor_msgs::msg::CompressedImage::SharedPtr msg)
@@ -155,8 +165,9 @@ public:
           });
         comp_image_sub_.emplace_back(comp_sub);
       } else {
-        RCLCPP_WARN(this->get_logger(), "topic '%s' type '%s' not supported", topic.c_str(),
-                    topic_type.c_str());
+        RCLCPP_WARN(
+          this->get_logger(), "topic '%s' type '%s' not supported", topic.c_str(),
+          topic_type.c_str());
       }
     }
 
@@ -164,7 +175,7 @@ public:
     encoder_ctrl_ = this->create_service<std_srvs::srv::SetBool>(
       "/encoder_ctrl",
       [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
-             std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+      std::shared_ptr<std_srvs::srv::SetBool::Response> response)
       {
         RCLCPP_INFO(this->get_logger(), "encoder_ctrl was called");
         encoding_enabled_ = request->data;
@@ -180,7 +191,7 @@ public:
       });
 
     RCLCPP_INFO(this->get_logger(), "create encoder control service: /encoder_ctrl");
-  };
+  }
 
   ~CoEncoder() override
   {}
@@ -208,7 +219,7 @@ private:
     int width = msg.width;
     int height = msg.height;
     std::string encoding = msg.encoding;
-    const uint8_t* data = msg.data.data();
+    const uint8_t * data = msg.data.data();
 
     int cv_type = -1;
 
@@ -224,7 +235,7 @@ private:
       throw std::runtime_error("Unsupported encoding type: " + encoding);
     }
 
-    cv::Mat mat(height, width, cv_type, const_cast<uint8_t*>(data), msg.step);
+    cv::Mat mat(height, width, cv_type, const_cast<uint8_t *>(data), msg.step);
     return mat;
   }
 
@@ -269,7 +280,7 @@ private:
   }
 };
 
-int main(int argc, char** argv)
+int main(int argc, char ** argv)
 {
   RCLCPP_INFO(rclcpp::get_logger("MAIN"), "Init");
   rclcpp::init(argc, argv);

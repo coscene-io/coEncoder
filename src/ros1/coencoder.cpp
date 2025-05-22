@@ -16,6 +16,7 @@
 #include <chrono>
 #include <vector>
 #include <map>
+#include <string>
 #include <ros/ros.h>
 #include <sensor_msgs/CompressedImage.h>
 #include <sensor_msgs/Image.h>
@@ -38,7 +39,8 @@ extern "C"
 class CoEncoder
 {
 public:
-  CoEncoder() : nh_("~")
+  CoEncoder()
+  : nh_("~")
   {
     nh_.param("output_fps", output_fps_, 30);
     nh_.param("bitrate", bitrate_, 800000);
@@ -70,16 +72,18 @@ public:
 
       int width = 0, height = 0;
       if (!get_image_size(resolution, width, height)) {
-        ROS_WARN("Failed to parse resolution '%s' for topic: %s", resolution.c_str(),
-                 topic.c_str());
+        ROS_WARN(
+          "Failed to parse resolution '%s' for topic: %s", resolution.c_str(),
+          topic.c_str());
         continue;
       }
       ROS_INFO("image size : %d*%d", topic.c_str(), width, height);
 
       std::string pub_topic = topic + "/h264";
-      encoder_map_.emplace(std::piecewise_construct,
-                           std::forward_as_tuple(pub_topic),
-                           std::forward_as_tuple(width, height, bitrate_, output_fps_));
+      encoder_map_.emplace(
+        std::piecewise_construct,
+        std::forward_as_tuple(pub_topic),
+        std::forward_as_tuple(width, height, bitrate_, output_fps_));
       ros::Publisher pub = nh_.advertise<CompressedVideo>(pub_topic, 1);
       ros::Subscriber sub;
       if (msg_type == "sensor_msgs/CompressedImage") {
@@ -107,17 +111,18 @@ public:
 
     for (const auto & pub_topic : sub_topics_) {
       if (timer_map_.find(pub_topic) == timer_map_.end()) {
-        auto timer = nh_.createTimer(interval,
-                                     [this, pub_topic](const ros::TimerEvent &)
-                                     {
-                                       if (encoding_enabled_) {
-                                         auto frame = encoder_map_[pub_topic + "/h264"].
-                                           encode_frame();
-                                         if (frame) {
-                                           publisher_map_[pub_topic + "/h264"].publish(*frame);
-                                         }
-                                       }
-                                     }, false, true);
+        auto timer = nh_.createTimer(
+          interval,
+          [this, pub_topic](const ros::TimerEvent &)
+          {
+            if (encoding_enabled_) {
+              auto frame = encoder_map_[pub_topic + "/h264"].
+              encode_frame();
+              if (frame) {
+                publisher_map_[pub_topic + "/h264"].publish(*frame);
+              }
+            }
+          }, false, true);
         timer_map_.emplace(pub_topic, timer);
       }
     }
@@ -145,21 +150,26 @@ private:
   static cv::Mat convertToCvMat(const sensor_msgs::Image & img_msg)
   {
     int cv_type = CV_8UC3;
-    if (img_msg.encoding == sensor_msgs::image_encodings::BGR8 ||
-      img_msg.encoding == sensor_msgs::image_encodings::RGB8) {
-      cv_type = CV_8UC3;
-    } else if (img_msg.encoding == sensor_msgs::image_encodings::MONO8 ||
-      img_msg.encoding == sensor_msgs::image_encodings::TYPE_8UC1) {
-      cv_type = CV_8UC1;
-    } else if (img_msg.encoding == sensor_msgs::image_encodings::TYPE_16UC1) {
-      cv_type = CV_16UC1;
-    } else {
-      ROS_ERROR("Unsupported encoding type: %s", img_msg.encoding.c_str());
-      return {}; // Return an empty Mat in case of unsupported encoding
+    switch (img_msg.encoding) {
+      case sensor_msgs::Image::BGR8:
+      case sensor_msgs::Image::RGB8:
+        cv_type = CV_8UC3;
+        break;
+      case sensor_msgs::Image::MONO8:
+      case sensor_msgs::Image::TYPE_8UC1:
+        cv_type = CV_8UC1;
+        break;
+      case sensor_msgs::Image::TYPE_16UC1:
+        cv_type = CV_16UC1;
+        break;
+      default:
+        ROS_ERROR("Unsupported encoding type: %s", img_msg.encoding.c_str());
+        return {};  // Return an empty Mat in case of unsupported encoding
     }
 
-    cv::Mat image(img_msg.height, img_msg.width, cv_type, const_cast<uchar*>(img_msg.data.data()),
-                  img_msg.step);
+
+    cv::Mat image(img_msg.height, img_msg.width, cv_type, const_cast<uchar *>(img_msg.data.data()),
+      img_msg.step);
     if (img_msg.encoding == sensor_msgs::image_encodings::RGB8) {
       cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
     }
@@ -250,7 +260,7 @@ private:
   int output_fps_ = 30, bitrate_ = 800000;
 };
 
-int main(int argc, char** argv)
+int main(int argc, char ** argv)
 {
   ros::init(argc, argv, "coencoder");
   CoEncoder node;

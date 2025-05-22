@@ -13,9 +13,10 @@
 // limitations under the License.
 
 
-#ifndef ROS_VIDEO_ENCODER_HPP
-#define ROS_VIDEO_ENCODER_HPP
+#ifndef ENCODER_HPP_
+#define ENCODER_HPP_
 
+#include <memory>
 #include <opencv2/opencv.hpp>
 
 #ifdef ROS_VERSION_1
@@ -25,7 +26,7 @@ using CompressedVideo = foxglove_msgs::CompressedVideo;
 #else
 #include <rclcpp/rclcpp.hpp>
 #include <foxglove_msgs/msg/compressed_video.h>
-using CompressedVideo=foxglove_msgs::msg::CompressedVideo;
+using CompressedVideo = foxglove_msgs::msg::CompressedVideo;
 #endif
 
 using CompressedVideoPtr = std::shared_ptr<CompressedVideo>;
@@ -65,12 +66,12 @@ public:
     codec_context_->width = width;
     codec_context_->height = height;
     codec_context_->time_base = {1, fps};
-    codec_context_->framerate = (AVRational){fps, 1};
+    codec_context_->framerate = (AVRational) {fps, 1};
     codec_context_->gop_size = 10;
     codec_context_->max_b_frames = 0;
     codec_context_->pix_fmt = AV_PIX_FMT_YUV420P;
 
-    AVDictionary* codecOpts = nullptr;
+    AVDictionary * codecOpts = nullptr;
     av_dict_set(&codecOpts, "tune", "zerolatency", 0);
     av_dict_set(&codecOpts, "preset", "ultrafast", 0);
 
@@ -87,8 +88,9 @@ public:
     frame_->width = codec_context_->width;
     frame_->height = codec_context_->height;
 
-    av_image_alloc(frame_->data, frame_->linesize, codec_context_->width,
-                   codec_context_->height, codec_context_->pix_fmt, 32);
+    av_image_alloc(
+      frame_->data, frame_->linesize, codec_context_->width,
+      codec_context_->height, codec_context_->pix_fmt, 32);
   }
 
   ~H264Encoder()
@@ -112,8 +114,9 @@ public:
 
   CompressedVideoPtr encode_frame()
   {
-    if (!received_)
+    if (!received_) {
       return nullptr;
+    }
     AVPacket pkt = {0};
     av_new_packet(&pkt, 0);
 
@@ -134,8 +137,8 @@ public:
 #ifdef ROS_VERSION_1
       video_msg.timestamp = ros::Time::now();
 #else
-            rclcpp::Clock clock(RCL_SYSTEM_TIME);
-            video_msg.timestamp = clock.now();
+      rclcpp::Clock clock(RCL_SYSTEM_TIME);
+      video_msg.timestamp = clock.now();
 #endif
 
       av_packet_unref(&pkt);
@@ -145,9 +148,9 @@ public:
   }
 
 private:
-  const AVCodec* codec_;
-  AVFrame* frame_ = nullptr;
-  AVCodecContext* codec_context_ = nullptr;
+  const AVCodec * codec_;
+  AVFrame * frame_ = nullptr;
+  AVCodecContext * codec_context_ = nullptr;
 
   std::mutex mutex_;
 
@@ -156,4 +159,4 @@ private:
   std::atomic<bool> received_{false};
 };
 
-#endif //ROS_VIDEO_ENCODER_HPP
+#endif  // ENCODER_HPP_
