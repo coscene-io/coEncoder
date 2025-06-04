@@ -141,6 +141,7 @@ jobs:
           
           mkdir -p $GITHUB_WORKSPACE/artifacts
           cp ../*.deb $GITHUB_WORKSPACE/artifacts/
+          ls -latrh $GITHUB_WORKSPACE/artifacts/
 
           DEB_FILENAME=$(basename $(ls $GITHUB_WORKSPACE/artifacts/*.deb))
           echo "DEB_FILENAME=$DEB_FILENAME" >> $GITHUB_ENV
