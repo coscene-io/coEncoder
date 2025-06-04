@@ -127,6 +127,12 @@ jobs:
               focal: [libswscale-dev]
               jammy: [libswscale-dev]
               noble: [libswscale-dev]
+          OpenCV:
+            ubuntu:
+              bionic: [libopencv-dev]
+              focal: [libopencv-dev]
+              jammy: [libopencv-dev]
+              noble: [libopencv-dev]
           EOF
           
           rosdep update --rosdistro=${{ matrix.ros_distribution }} --include-eol-distros
