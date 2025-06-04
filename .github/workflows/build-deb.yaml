@@ -99,6 +99,36 @@ jobs:
       - name: Generate debian/ directory and build .deb package
         id: build_deb
         run: |
+          mkdir -p /etc/ros/rosdep/sources.list.d
+          echo "yaml file:///etc/ros/rosdep/ffmpeg-rules.yaml" > /etc/ros/rosdep/sources.list.d/20-ffmpeg.list
+          
+          cat > /etc/ros/rosdep/ffmpeg-rules.yaml << EOF
+          libavformat-dev:
+            ubuntu:
+              bionic: [libavformat-dev]
+              focal: [libavformat-dev]
+              jammy: [libavformat-dev]
+              noble: [libavformat-dev]
+          libavcodec-dev:
+            ubuntu:
+              bionic: [libavcodec-dev]
+              focal: [libavcodec-dev]
+              jammy: [libavcodec-dev]
+              noble: [libavcodec-dev]
+          libavutil-dev:
+            ubuntu:
+              bionic: [libavutil-dev]
+              focal: [libavutil-dev]
+              jammy: [libavutil-dev]
+              noble: [libavutil-dev]
+          libswscale-dev:
+            ubuntu:
+              bionic: [libswscale-dev]
+              focal: [libswscale-dev]
+              jammy: [libswscale-dev]
+              noble: [libswscale-dev]
+          EOF
+          
           rosdep update --rosdistro=${{ matrix.ros_distribution }} --include-eol-distros
           bloom-generate rosdebian --ros-distro ${{ matrix.ros_distribution }}
           DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc -a${{ matrix.arch }}
