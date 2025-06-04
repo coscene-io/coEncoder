@@ -22,7 +22,8 @@ Edit the configuration parameters in the launch file (`coencoder/launch/coencode
     
         <node name="coencoder" pkg="coencoder" type="coencoder" output="screen">
             <param name="output_fps" value="20"/>
-            <param name="bitrate" value="400000"/>
+            <param name="bitrate" value="400000"/>  
+            <param name="depth_image_max_value" value="10000"/>
         </node>
     </launch>
     ```
@@ -32,6 +33,7 @@ Edit the configuration parameters in the launch file (`coencoder/launch/coencode
         <node pkg="coencoder" exec="coencoder" name="coencoder" output="screen">
         <param name="output_fps" value="20"/>
         <param name="bitrate" value="400000"/>
+        <param name="depth_image_max_value" value="10000"/>
         <param name="subscribe_topics" value="['/Node_1_image', '/Node_2_image']"/>
         <param name="video_resolutions" value="['1920*1080', '1920*1080']"/>
         </node>
