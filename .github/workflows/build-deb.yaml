@@ -17,38 +17,38 @@ jobs:
             arch: arm64
             distro: focal
             label: [ linux-arm-64-8c-32g-300gb ]
-          - ros_distribution: melodic
-            arch: amd64
-            distro: bionic
-            label: ubuntu-latest
-          - ros_distribution: melodic
-            arch: arm64
-            distro: bionic
-            label: [ linux-arm-64-8c-32g-300gb ]
-          - ros_distribution: foxy
-            arch: amd64
-            distro: focal
-            label: ubuntu-latest
-          - ros_distribution: foxy
-            arch: arm64
-            distro: focal
-            label: [ linux-arm-64-8c-32g-300gb ]
-          - ros_distribution: humble
-            arch: amd64
-            distro: jammy
-            label: ubuntu-latest
-          - ros_distribution: humble
-            arch: arm64
-            distro: jammy
-            label: [ linux-arm-64-8c-32g-300gb ]
-          - ros_distribution: jazzy
-            arch: amd64
-            distro: noble
-            label: ubuntu-latest
-          - ros_distribution: jazzy
-            arch: arm64
-            distro: noble
-            label: [ linux-arm-64-8c-32g-300gb ]
+#          - ros_distribution: melodic
+#            arch: amd64
+#            distro: bionic
+#            label: ubuntu-latest
+#          - ros_distribution: melodic
+#            arch: arm64
+#            distro: bionic
+#            label: [ linux-arm-64-8c-32g-300gb ]
+#          - ros_distribution: foxy
+#            arch: amd64
+#            distro: focal
+#            label: ubuntu-latest
+#          - ros_distribution: foxy
+#            arch: arm64
+#            distro: focal
+#            label: [ linux-arm-64-8c-32g-300gb ]
+#          - ros_distribution: humble
+#            arch: amd64
+#            distro: jammy
+#            label: ubuntu-latest
+#          - ros_distribution: humble
+#            arch: arm64
+#            distro: jammy
+#            label: [ linux-arm-64-8c-32g-300gb ]
+#          - ros_distribution: jazzy
+#            arch: amd64
+#            distro: noble
+#            label: ubuntu-latest
+#          - ros_distribution: jazzy
+#            arch: arm64
+#            distro: noble
+#            label: [ linux-arm-64-8c-32g-300gb ]
 
     name: Build deb (ROS ${{ matrix.ros_distribution }} - ${{ matrix.arch }})
     runs-on: ${{ matrix.label }}
