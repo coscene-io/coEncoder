@@ -44,16 +44,21 @@ public:
   {
     nh_.param("output_fps", output_fps_, 30);
     nh_.param("bitrate", bitrate_, 800000);
-    ROS_INFO("[ros1 constructor] output_fps: %d, bitrate: %d", output_fps_, bitrate_);
+    nh_.param("depth_image_max_value", depth_image_max_val_, 1000);
+    ROS_INFO(
+      "[ros1 constructor] output_fps: %d, bitrate: %d, depth_image_max_val: %d", output_fps_,
+      bitrate_, depth_image_max_val_);
 
     if (!nh_.getParam("subscribe_topics", sub_topics_)) {
       ROS_ERROR("Failed to get param 'subscribe_topics'");
       ros::shutdown();
+      exit(-1);
     }
 
     if (!nh_.getParam("video_resolutions", resolutions_)) {
       ROS_ERROR("Failed to get param 'video_resolutions'");
       ros::shutdown();
+      exit(-1);
     }
     ROS_INFO("[constructor] sub_topics: %s", format_topics(sub_topics_).c_str());
 
@@ -77,7 +82,7 @@ public:
           topic.c_str());
         continue;
       }
-      ROS_INFO("image size : %d*%d", topic.c_str(), width, height);
+      ROS_INFO("topic: %s, image size : %d*%d", topic.c_str(), width, height);
 
       std::string pub_topic = topic + "/h264";
       encoder_map_.emplace(
@@ -92,7 +97,8 @@ public:
           [this, pub_topic, height](const sensor_msgs::CompressedImage::ConstPtr & msg)
           {
             if (encoding_enabled_) {
-              process_image(cv::imdecode(cv::Mat(msg->data), cv::IMREAD_COLOR), pub_topic, height);
+              cv::Mat decoded_img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_UNCHANGED);
+              process_image(decoded_img, pub_topic, height);
             }
           });
       } else {
@@ -178,8 +184,26 @@ private:
       ROS_WARN("Empty image received");
       return;
     }
+
+    cv::Mat img_8u;
+    if (img.depth() != CV_8U) {
+      double alpha = 255.0 / static_cast<float>(depth_image_max_val_);
+      img.convertTo(img_8u, CV_8U, alpha);
+    } else {
+      img_8u = img;
+    }
+
     cv::Mat yuv_img;
-    cv::cvtColor(img, yuv_img, cv::COLOR_BGR2YUV_I420);
+    if (img_8u.channels() == 1) {
+      cv::Mat bgr_img;
+      cv::cvtColor(img_8u, bgr_img, cv::COLOR_GRAY2BGR);
+      cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
+    } else if (img.channels() == 3) {
+      cv::cvtColor(img, yuv_img, cv::COLOR_BGR2YUV_I420);
+    } else {
+      ROS_WARN("Unsupported image channels: %d", img.channels());
+      return;
+    }
 
     encoder_map_[pub_topic].send_frame(yuv_img);
   }
@@ -237,7 +261,7 @@ private:
 
   ros::NodeHandle nh_;
 
-  std::atomic<bool> encoding_enabled_{false};
+  std::atomic<bool> encoding_enabled_{true};
 
   std::vector<std::string> sub_topics_;
   std::vector<std::string> resolutions_;
@@ -252,7 +276,7 @@ private:
 
   std::map<std::string, std::string> topic_map_;
 
-  int output_fps_ = 30, bitrate_ = 800000;
+  int output_fps_ = 30, bitrate_ = 800000, depth_image_max_val_ = 10000;
 };
 
 int main(int argc, char ** argv)
