@@ -21,7 +21,7 @@ message(STATUS "ROS_ROOT: " $ENV{ROS_ROOT})
 if("$ENV{ROS_VERSION}" STREQUAL "1")
     message(STATUS "Building with catkin")
     set(ROS_BUILD_TYPE "catkin")
-    add_compile_definitions(ROS_VERSION_1)
+    add_definitions(-DROS_VERSION_1)
 
     # Find catkin packages and dependencies
     find_package(catkin REQUIRED COMPONENTS
@@ -61,7 +61,7 @@ if("$ENV{ROS_VERSION}" STREQUAL "1")
     )
 elseif("$ENV{ROS_VERSION}" STREQUAL "2")
     message(STATUS "Building with ament_cmake")
-    add_compile_definitions(ROS_VERSION_2)
+    add_definitions(-DROS_VERSION_2)
 
     set(ROS_BUILD_TYPE "ament_cmake")
 
