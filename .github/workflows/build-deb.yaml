@@ -25,14 +25,6 @@ jobs:
             arch: arm64
             distro: bionic
             label: [ linux-arm-64-8c-32g-300gb ]
-          - ros_distribution: foxy
-            arch: amd64
-            distro: focal
-            label: ubuntu-latest
-          - ros_distribution: foxy
-            arch: arm64
-            distro: focal
-            label: [ linux-arm-64-8c-32g-300gb ]
           - ros_distribution: humble
             arch: amd64
             distro: jammy
@@ -58,8 +50,6 @@ jobs:
       matrix_result_noetic_arm64: ${{ steps.build_deb.outputs.matrix_result_noetic_arm64 }}
       matrix_result_melodic_amd64: ${{ steps.build_deb.outputs.matrix_result_melodic_amd64 }}
       matrix_result_melodic_arm64: ${{ steps.build_deb.outputs.matrix_result_melodic_arm64 }}
-      matrix_result_foxy_amd64: ${{ steps.build_deb.outputs.matrix_result_foxy_amd64 }}
-      matrix_result_foxy_arm64: ${{ steps.build_deb.outputs.matrix_result_foxy_arm64 }}
       matrix_result_humble_amd64: ${{ steps.build_deb.outputs.matrix_result_humble_amd64 }}
       matrix_result_humble_arm64: ${{ steps.build_deb.outputs.matrix_result_humble_arm64 }}
       matrix_result_jazzy_amd64: ${{ steps.build_deb.outputs.matrix_result_jazzy_amd64 }}
@@ -76,7 +66,7 @@ jobs:
         run: |
           echo "current sha: ${{ github.sha}}, current ref: ${{ github.ref }}"
           git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-          git config --global --add safe.directory /__w/cobridge/cobridge
+          git config --global --add safe.directory /__w/coEncoder/coEncoder
           
           git clone https://github.com/${{ github.repository }}.git .
           
@@ -203,8 +193,6 @@ jobs:
           URLS="${URLS}${{ needs.build-deb-package.outputs.matrix_result_melodic_arm64 }};"
           URLS="${URLS}${{ needs.build-deb-package.outputs.matrix_result_noetic_amd64 }};"
           URLS="${URLS}${{ needs.build-deb-package.outputs.matrix_result_noetic_arm64 }};"
-          URLS="${URLS}${{ needs.build-deb-package.outputs.matrix_result_foxy_amd64 }};"
-          URLS="${URLS}${{ needs.build-deb-package.outputs.matrix_result_foxy_arm64 }};"
           URLS="${URLS}${{ needs.build-deb-package.outputs.matrix_result_humble_amd64 }};"
           URLS="${URLS}${{ needs.build-deb-package.outputs.matrix_result_humble_arm64 }};"
           URLS="${URLS}${{ needs.build-deb-package.outputs.matrix_result_jazzy_amd64 }};"
