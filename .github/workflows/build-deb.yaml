@@ -17,14 +17,14 @@ jobs:
             arch: arm64
             distro: focal
             label: [ linux-arm-64-8c-32g-300gb ]
-          - ros_distribution: melodic
-            arch: amd64
-            distro: bionic
-            label: ubuntu-latest
-          - ros_distribution: melodic
-            arch: arm64
-            distro: bionic
-            label: [ linux-arm-64-8c-32g-300gb ]
+#          - ros_distribution: melodic
+#            arch: amd64
+#            distro: bionic
+#            label: ubuntu-latest
+#          - ros_distribution: melodic
+#            arch: arm64
+#            distro: bionic
+#            label: [ linux-arm-64-8c-32g-300gb ]
           - ros_distribution: humble
             arch: amd64
             distro: jammy
@@ -48,8 +48,8 @@ jobs:
     outputs:
       matrix_result_noetic_amd64: ${{ steps.build_deb.outputs.matrix_result_noetic_amd64 }}
       matrix_result_noetic_arm64: ${{ steps.build_deb.outputs.matrix_result_noetic_arm64 }}
-      matrix_result_melodic_amd64: ${{ steps.build_deb.outputs.matrix_result_melodic_amd64 }}
-      matrix_result_melodic_arm64: ${{ steps.build_deb.outputs.matrix_result_melodic_arm64 }}
+#      matrix_result_melodic_amd64: ${{ steps.build_deb.outputs.matrix_result_melodic_amd64 }}
+#      matrix_result_melodic_arm64: ${{ steps.build_deb.outputs.matrix_result_melodic_arm64 }}
       matrix_result_humble_amd64: ${{ steps.build_deb.outputs.matrix_result_humble_amd64 }}
       matrix_result_humble_arm64: ${{ steps.build_deb.outputs.matrix_result_humble_arm64 }}
       matrix_result_jazzy_amd64: ${{ steps.build_deb.outputs.matrix_result_jazzy_amd64 }}
@@ -165,7 +165,7 @@ jobs:
 
       - name: Update APT Source ( OSS, TEST ONLY )
         if: github.event_name != 'release'
-        uses: coscene-io/update-apt-source@main
+        uses: coscene-io/update-apt-source@v1.1.0
         with:
           ubuntu_distro: ${{ matrix.distro }}
           deb_paths: ${{ github.workspace }}/artifacts/${{ env.DEB_FILENAME }}
