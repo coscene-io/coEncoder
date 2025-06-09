@@ -165,7 +165,7 @@ jobs:
 
       - name: Update APT Source ( OSS, TEST ONLY )
         if: github.event_name != 'release'
-        uses: coscene-io/update-apt-source@v1.1.0
+        uses: coscene-io/update-apt-source@main
         with:
           ubuntu_distro: ${{ matrix.distro }}
           deb_paths: ${{ github.workspace }}/artifacts/${{ env.DEB_FILENAME }}
