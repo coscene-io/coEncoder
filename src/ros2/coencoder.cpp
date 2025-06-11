@@ -25,6 +25,8 @@
 #include <opencv2/opencv.hpp>
 #include <std_srvs/srv/set_bool.h>
 #include <std_srvs/srv/set_bool.hpp>
+#include <utility>
+#include <unordered_map>
 #include "encoder.hpp"
 
 class CoEncoder : public rclcpp::Node
@@ -73,10 +75,11 @@ public:
       format_topics(resolutions_).c_str());
 
     check_and_subscribe_topics();
-    retry_timer_ = this->create_wall_timer(std::chrono::seconds(1),
-                                           [this] {
-                                               check_and_subscribe_topics();
-                                           });
+    retry_timer_ = this->create_wall_timer(
+      std::chrono::seconds(1),
+      [this] {
+        check_and_subscribe_topics();
+      });
 
     // TODO(fei): need a service to control encode
     encoder_ctrl_ = this->create_service<std_srvs::srv::SetBool>(
@@ -125,7 +128,8 @@ private:
   std::vector<std::string> pending_topics_;
   rclcpp::TimerBase::SharedPtr retry_timer_;
 
-  void check_and_subscribe_topics() {
+  void check_and_subscribe_topics()
+  {
     RCLCPP_INFO(this->get_logger(), "check_and_subscribe_topics...");
 
     if (pending_topics_.empty()) {
@@ -133,26 +137,28 @@ private:
       retry_timer_->cancel();
       return;
     }
-    
+
     auto topic_names_and_types = this->get_topic_names_and_types();
     RCLCPP_INFO(this->get_logger(), "topic count: %zu", topic_names_and_types.size());
-    
-    for (auto it = pending_topics_.begin(); it != pending_topics_.end();) {
-      const auto& topic = *it;
+
+    for (auto it = pending_topics_.begin(); it != pending_topics_.end(); ) {
+      const auto & topic = *it;
       auto topic_it = topic_names_and_types.find(topic);
-      
+
       if (topic_it != topic_names_and_types.end() && !topic_it->second.empty()) {
         std::string topic_type = topic_it->second[0];
         bool subscribed = false;
-        
+
         if (topic_type == "sensor_msgs/msg/Image") {
           subscribed = subscribe_image_topic(topic);
         } else if (topic_type == "sensor_msgs/msg/CompressedImage") {
           subscribed = subscribe_compressed_image_topic(topic);
         } else {
-          RCLCPP_FATAL(this->get_logger(), "unsupported topic type: %s, %s", topic.c_str(), topic_type.c_str());
+          RCLCPP_FATAL(
+            this->get_logger(), "unsupported topic type: %s, %s",
+            topic.c_str(), topic_type.c_str());
         }
-        
+
         if (subscribed) {
           it = pending_topics_.erase(it);
           continue;
@@ -161,14 +167,15 @@ private:
       ++it;
     }
   }
-  
-  bool setup_encoder_and_publisher(const std::string& topic, const std::string& pub_topic) {
+
+  bool setup_encoder_and_publisher(const std::string & topic, const std::string & pub_topic)
+  {
     const auto resolution = topic_resolution_[topic];
-    
+
     try {
       auto pub = this->create_publisher<foxglove_msgs::msg::CompressedVideo>(pub_topic, 10);
       publisher_map_.emplace(pub_topic, pub);
-      
+
       encoder_map_.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(pub_topic),
@@ -177,12 +184,13 @@ private:
       RCLCPP_ERROR(this->get_logger(), "create encoder/publisher failed: %s", e.what());
       return false;
     }
-    
+
     setup_encoding_timer(pub_topic);
     return true;
   }
-  
-  void setup_encoding_timer(const std::string& pub_topic) {
+
+  void setup_encoding_timer(const std::string & pub_topic)
+  {
     if (timer_map_.find(pub_topic) == timer_map_.end()) {
       auto timer = this->create_wall_timer(
         std::chrono::milliseconds(
@@ -194,11 +202,12 @@ private:
       timer_map_.emplace(pub_topic, timer);
     }
   }
-  
-  void encode_and_publish_frame(const std::string& pub_topic) {
-    if (encoding_enabled_ && 
-        encoder_map_.find(pub_topic) != encoder_map_.end() &&
-        publisher_map_.find(pub_topic) != publisher_map_.end())
+
+  void encode_and_publish_frame(const std::string & pub_topic)
+  {
+    if (encoding_enabled_ &&
+      encoder_map_.find(pub_topic) != encoder_map_.end() &&
+      publisher_map_.find(pub_topic) != publisher_map_.end())
     {
       try {
         auto frame = encoder_map_[pub_topic].encode_frame();
@@ -210,50 +219,54 @@ private:
       }
     }
   }
-  
-  bool subscribe_image_topic(const std::string& topic) {
+
+  bool subscribe_image_topic(const std::string & topic)
+  {
     RCLCPP_INFO(
-        this->get_logger(), "create Image subscriber for topic '%s', type: sensor_msgs/msg/Image",
-        topic.c_str());
-    
+      this->get_logger(), "create Image subscriber for topic '%s', type: sensor_msgs/msg/Image",
+      topic.c_str());
+
     auto pub_topic = topic + "/h264";
     if (!setup_encoder_and_publisher(topic, pub_topic)) {
       return false;
     }
-    
+
     auto img_sub = this->create_subscription<sensor_msgs::msg::Image>(
       topic, 10,
       [this, pub_topic](sensor_msgs::msg::Image::SharedPtr msg)
       {
         process_image(msg, pub_topic);
       });
-    
+
     image_sub_.emplace_back(img_sub);
     return true;
   }
-  
-  bool subscribe_compressed_image_topic(const std::string& topic) {
+
+  bool subscribe_compressed_image_topic(const std::string & topic)
+  {
     RCLCPP_INFO(
-        this->get_logger(), "create Image subscriber for topic '%s', type: sensor_msgs/msg/CompressedImage",
-        topic.c_str());
-    
+      this->get_logger(),
+      "create Image subscriber for topic '%s', type: sensor_msgs/msg/CompressedImage",
+      topic.c_str());
+
     auto pub_topic = topic + "/h264";
     if (!setup_encoder_and_publisher(topic, pub_topic)) {
       return false;
     }
-    
+
     auto comp_sub = this->create_subscription<sensor_msgs::msg::CompressedImage>(
       topic, 10,
       [this, pub_topic](sensor_msgs::msg::CompressedImage::SharedPtr msg)
       {
         process_compressed_image(msg, pub_topic);
       });
-    
+
     comp_image_sub_.emplace_back(comp_sub);
     return true;
   }
-  
-  void process_image(sensor_msgs::msg::Image::SharedPtr msg, const std::string& pub_topic) {
+
+  void process_image(sensor_msgs::msg::Image::SharedPtr msg, const std::string & pub_topic)
+  {
     try {
       if (encoding_enabled_) {
         cv::Mat img = convert_to_cv_mat(*msg);
@@ -267,8 +280,11 @@ private:
       RCLCPP_ERROR(this->get_logger(), "process image failed: %s", e.what());
     }
   }
-  
-  void process_compressed_image(sensor_msgs::msg::CompressedImage::SharedPtr msg, const std::string& pub_topic) {
+
+  void process_compressed_image(
+    sensor_msgs::msg::CompressedImage::SharedPtr msg,
+    const std::string & pub_topic)
+  {
     try {
       if (encoding_enabled_) {
         cv::Mat img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_COLOR);
