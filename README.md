@@ -43,9 +43,11 @@ Edit the configuration parameters in the launch file (`coencoder/launch/coencode
 - `subscribe_topics`: Specify one or more topics for H264 encoding. The topic's message types must be `sensor_msgs/CompressedImage` or `sensor_msgs/Image`.
 - `video_resolutions`: Specify the resolution for each topic. Ensure a one-to-one correspondence with `subscribe_topics`.
 
-## Compile
+## Compile OR deb install
 
-- ROS1
+*** You can install CoEncoder by compiling it yourself. Alternatively, we will also provide a .deb package for installation. ***
+- Compile 
+  - ROS1
     ```bash
     # Copy the project into your ROS workspace
     cp -r {this_repo} {your_ros_ws}/src/
@@ -57,29 +59,40 @@ Edit the configuration parameters in the launch file (`coencoder/launch/coencode
   
     catkin_make --pkg coencoder install
     ```
-- ROS2
+  - ROS2
     ```bash
     # Copy the project into your ROS workspace
     cp -r {this_repo} {your_ros_ws}/src/
-  
     # Source ROS setup and build
     source /opt/ros/{ros_distro}/setup.bash
   
     cd {your_ros_ws}
-  
     colcon build --packages-select coencoder    
     ```
+    
+- deb Install
+  ```bash
+    dpkg -i ros-{ros distro}-coencoder_latest_{system arch}.deb
+  ```
 
 ## RUN
 
 - ROS1
-    ```bash
-    source {your_ros_ws}/install/setup.bash
-    roslaunch coencoder coencoder.launch
-    ```
+  ```bash
+  # if install coencoder by Compile, source your workspace  
+  source {your_ros_ws}/install/setup.bash
+  # if install coencoder by deb, source ros
+  source /opt/ros/{ros destro}/setup.bash
+  
+  roslaunch coencoder coencoder.launch
+  ```
   
 - ROS2
-    ```bash
-    source {your_ros_ws}/install/setup.bash
-    ros2 launch coencoder coencoder_launch.xml
-    ```
+  ```bash
+  # if install coencoder by Compile, source your workspace  
+  source {your_ros_ws}/install/setup.bash
+  # if install coencoder by deb, source ros
+  source /opt/ros/{ros destro}/setup.bash
+  
+  ros2 launch coencoder coencoder_launch.xml
+  ```
