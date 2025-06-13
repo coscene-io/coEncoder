@@ -96,6 +96,11 @@ jobs:
           echo "GITHUB_REF: $GITHUB_REF"
           sed -i "s#<version>.*</version>#<version>$VERSION</version>#" ./package.xml
 
+      - name: Install ROS dependencies
+        run: |
+          apt-get update
+          apt-get install -y ros-${{ matrix.ros_distribution }}-foxglove-msgs ros-${{ matrix.ros_distribution }}-image-transport
+
       - name: Generate debian/ directory and build .deb package
         id: build_deb
         run: |
