@@ -101,7 +101,7 @@ if(ROS_BUILD_TYPE STREQUAL "catkin")
     )
 
     install(DIRECTORY src/ros1/launch
-            DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+            DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
             FILES_MATCHING PATTERN "*.launch"
     )
 elseif(ROS_BUILD_TYPE STREQUAL "ament_cmake")
