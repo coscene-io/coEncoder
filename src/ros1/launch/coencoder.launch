@@ -1,6 +1,6 @@
 <launch>
-    <rosparam param="/coencoder/subscribe_topics">['/Node_1_image', '/Node_2_image']</rosparam>
-    <rosparam param="/coencoder/video_resolutions">['1920*1080', '1920*1080']</rosparam>
+    <rosparam param="/coencoder/subscribe_topics">['/cam_l/color/image_raw', '/cam_h/color/image_raw', '/cam_r/color/image_raw']</rosparam>
+    <rosparam param="/coencoder/video_resolutions">['640*480', '640*480', '640*480']</rosparam>
 
     <node name="coencoder" pkg="coencoder" type="coencoder" output="screen">
         <param name="output_fps"    value="20"/>
@@ -8,5 +8,4 @@
         <param name="depth_image_max_value" value="10000"/>
     </node>
 </launch>
-
 
