@@ -44,7 +44,7 @@ jobs:
 
     name: Build deb (ROS ${{ matrix.ros_distribution }} - ${{ matrix.arch }})
     runs-on: ${{ matrix.label }}
-    container: cobridge/ros-${{ matrix.ros_distribution }}:latest
+    container: cosceneinternal/ros-${{ matrix.ros_distribution }}:latest
     outputs:
       matrix_result_noetic_amd64: ${{ steps.build_deb.outputs.matrix_result_noetic_amd64 }}
       matrix_result_noetic_arm64: ${{ steps.build_deb.outputs.matrix_result_noetic_arm64 }}
