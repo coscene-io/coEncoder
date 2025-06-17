@@ -65,6 +65,7 @@ public:
     get_all_topics_and_type();
     ros::Duration interval(1.0 / static_cast<double>(output_fps_));
 
+    std::vector<std::string> legal_topics;
     for (size_t i = 0; i < sub_topics_.size(); ++i) {
       const std::string & topic = sub_topics_[i];
       const std::string & resolution = resolutions_[i];
@@ -113,9 +114,10 @@ public:
       }
       subscribers_.emplace_back(sub);
       publisher_map_.emplace(pub_topic, pub);
+      legal_topics.emplace_back(topic);
     }
 
-    for (const auto & pub_topic : sub_topics_) {
+    for (const auto & pub_topic : legal_topics) {
       if (timer_map_.find(pub_topic) == timer_map_.end()) {
         auto timer = nh_.createTimer(
           interval,
