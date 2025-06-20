@@ -16,6 +16,12 @@
 #include <string>
 #include <memory>
 #include <map>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <signal.h>
+#include <cstring>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
@@ -28,6 +34,7 @@
 #include <utility>
 #include <unordered_map>
 #include "encoder.hpp"
+#include "singleton_lock.hpp"
 
 class CoEncoder : public rclcpp::Node
 {
@@ -367,12 +374,23 @@ private:
 
 int main(int argc, char ** argv)
 {
-  RCLCPP_INFO(rclcpp::get_logger("MAIN"), "Init");
   rclcpp::init(argc, argv);
 
-  auto node = std::make_shared<CoEncoder>();
-  RCLCPP_INFO(rclcpp::get_logger("MAIN"), "CoEncoder SPIN!");
-  rclcpp::spin(node);
+  coscene::SingletonLock lock("coencoder");
+  if (!lock.acquire()) {
+    RCLCPP_ERROR(rclcpp::get_logger("MAIN"), "Failed to acquire singleton lock. Another instance may be running.");
+    return 1;
+  }
+
+  lock.setup_signal_handlers([](){ rclcpp::shutdown(); });
+
+  try {
+    auto node = std::make_shared<CoEncoder>();
+    RCLCPP_INFO(rclcpp::get_logger("MAIN"), "CoEncoder SPIN!");
+    rclcpp::spin(node);
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(rclcpp::get_logger("MAIN"), "Exception in main: %s", e.what());
+  }
   rclcpp::shutdown();
   return 0;
 }

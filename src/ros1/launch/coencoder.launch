@@ -1,6 +1,6 @@
 <launch>
-    <rosparam param="/coencoder/subscribe_topics">['/cam_l/color/image_raw', '/cam_h/color/image_raw', '/cam_r/color/image_raw']</rosparam>
-    <rosparam param="/coencoder/video_resolutions">['640*480', '640*480', '640*480']</rosparam>
+    <rosparam param="/coencoder/subscribe_topics">['/camera']</rosparam>
+    <rosparam param="/coencoder/video_resolutions">['640*480']</rosparam>
 
     <node name="coencoder" pkg="coencoder" type="coencoder" output="screen">
         <param name="output_fps"    value="20"/>

@@ -1,9 +1,13 @@
 <launch>
-  <node pkg="coencoder" exec="coencoder" name="coencoder" output="screen">
+  <!-- Define default values for parameters -->
+  <arg name="subscribe_topics" default="['/Node_1_image', '/Node_2_image']"/>
+  <arg name="video_resolutions" default="['1920*1080', '1920*1080']"/>
+  
+  <node pkg="coencoder" exec="coencoder" name="coencoder" output="screen" respawn="false" required="true">
     <param name="output_fps" value="20"/>
     <param name="bitrate" value="400000"/>
     <param name="depth_image_max_value" value="10000"/>
-    <param name="subscribe_topics" value="['/Node_1_image', '/Node_2_image']"/>
-    <param name="video_resolutions" value="['1920*1080', '1920*1080']"/>
+    <param name="subscribe_topics" value="$(arg subscribe_topics)"/>
+    <param name="video_resolutions" value="$(arg video_resolutions)"/>
   </node>
 </launch>
