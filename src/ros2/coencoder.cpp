@@ -378,17 +378,19 @@ int main(int argc, char ** argv)
 
   coscene::SingletonLock lock("coencoder");
   if (!lock.acquire()) {
-    RCLCPP_ERROR(rclcpp::get_logger("MAIN"), "Failed to acquire singleton lock. Another instance may be running.");
+    RCLCPP_ERROR(
+      rclcpp::get_logger(
+        "MAIN"), "Failed to acquire singleton lock. Another instance may be running.");
     return 1;
   }
 
-  lock.setup_signal_handlers([](){ rclcpp::shutdown(); });
+  lock.setup_signal_handlers([]() {rclcpp::shutdown();});
 
   try {
     auto node = std::make_shared<CoEncoder>();
     RCLCPP_INFO(rclcpp::get_logger("MAIN"), "CoEncoder SPIN!");
     rclcpp::spin(node);
-  } catch (const std::exception& e) {
+  } catch (const std::exception & e) {
     RCLCPP_ERROR(rclcpp::get_logger("MAIN"), "Exception in main: %s", e.what());
   }
   rclcpp::shutdown();

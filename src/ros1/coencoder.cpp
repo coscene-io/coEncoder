@@ -24,6 +24,8 @@
 #include <foxglove_msgs/CompressedVideo.h>
 #include <std_srvs/SetBool.h>
 #include <opencv2/opencv.hpp>
+#include <unordered_map>
+#include <utility>
 #include "encoder.hpp"
 #include "singleton_lock.hpp"
 
@@ -102,7 +104,7 @@ public:
   ~CoEncoder() = default;
 
 
-  void retry_subscribe_topics(const ros::TimerEvent&)
+  void retry_subscribe_topics(const ros::TimerEvent &)
   {
     if (pending_topics_.empty()) {
       retry_timer_.stop();
@@ -113,7 +115,7 @@ public:
     get_all_topics_and_type();
 
     for (auto it = pending_topics_.begin(); it != pending_topics_.end(); ) {
-      const std::string& topic = *it;
+      const std::string & topic = *it;
       auto topic_it = topic_map_.find(topic);
 
       if (topic_it == topic_map_.end()) {
@@ -124,13 +126,19 @@ public:
 
       std::string topic_type = topic_it->second;
       if (topic_type != "sensor_msgs/Image" && topic_type != "sensor_msgs/CompressedImage") {
-        ROS_WARN("Unsupported message type '%s' for topic '%s', will retry", topic_type.c_str(), topic.c_str());
+        ROS_WARN(
+          "Unsupported message type '%s' for topic '%s', will retry",
+          topic_type.c_str(), topic.c_str());
         ++it;
         continue;
       }
 
-      if (std::find_if(subscribers_.begin(), subscribers_.end(), 
-          [&topic](const ros::Subscriber& s) { return s.getTopic() == topic; }) != subscribers_.end()) {
+      if (std::find_if(
+          subscribers_.begin(), subscribers_.end(),
+          [&topic](const ros::Subscriber & s) {
+            return s.getTopic() == topic;
+          }) != subscribers_.end())
+      {
         ROS_DEBUG("Topic %s already subscribed, removing from pending list.", topic.c_str());
         it = pending_topics_.erase(it);
         continue;
@@ -143,7 +151,7 @@ public:
         continue;
       }
 
-      const auto& resolution = resolution_it->second;
+      const auto & resolution = resolution_it->second;
       std::string pub_topic = topic + "/h264";
 
       if (publisher_map_.count(pub_topic) == 0) {
@@ -164,7 +172,7 @@ public:
       if (topic_type == "sensor_msgs/Image") {
         sub = nh_.subscribe<sensor_msgs::Image>(
           topic, 1,
-          [this, pub_topic](const sensor_msgs::Image::ConstPtr& msg)
+          [this, pub_topic](const sensor_msgs::Image::ConstPtr & msg)
           {
             if (encoding_enabled_) {
               process_image(convertToCvMat(*msg), pub_topic);
@@ -174,7 +182,7 @@ public:
       } else if (topic_type == "sensor_msgs/CompressedImage") {
         sub = nh_.subscribe<sensor_msgs::CompressedImage>(
           topic, 1,
-          [this, pub_topic](const sensor_msgs::CompressedImage::ConstPtr& msg)
+          [this, pub_topic](const sensor_msgs::CompressedImage::ConstPtr & msg)
           {
             if (encoding_enabled_) {
               cv::Mat decoded_img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_UNCHANGED);
@@ -190,7 +198,7 @@ public:
         if (timer_map_.count(pub_topic) == 0) {
           auto timer = nh_.createTimer(
             ros::Duration(1.0 / static_cast<double>(output_fps_)),
-            [this, pub_topic](const ros::TimerEvent&)
+            [this, pub_topic](const ros::TimerEvent &)
             {
               if (encoding_enabled_) {
                 auto frame = encoder_map_[pub_topic].encode_frame();
@@ -353,12 +361,12 @@ int main(int argc, char ** argv)
     return 1;
   }
 
-  lock.setup_signal_handlers([](){ ros::shutdown(); });
+  lock.setup_signal_handlers([]() {ros::shutdown();});
 
   try {
     CoEncoder node;
     ros::spin();
-  } catch (const std::exception& e) {
+  } catch (const std::exception & e) {
     ROS_ERROR("Exception in main: %s", e.what());
   }
   return 0;
