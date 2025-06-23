@@ -24,6 +24,8 @@
 #include <foxglove_msgs/CompressedVideo.h>
 #include <std_srvs/SetBool.h>
 #include <opencv2/opencv.hpp>
+#include <unordered_map>
+#include <utility>
 #include "encoder.hpp"
 
 extern "C"
@@ -65,73 +67,21 @@ public:
     get_all_topics_and_type();
     ros::Duration interval(1.0 / static_cast<double>(output_fps_));
 
+    pending_topics_ = sub_topics_;
     for (size_t i = 0; i < sub_topics_.size(); ++i) {
       const std::string & topic = sub_topics_[i];
       const std::string & resolution = resolutions_[i];
-
-      std::string msg_type = topic_map_[topic];
-      if (msg_type != "sensor_msgs/CompressedImage" && msg_type != "sensor_msgs/Image") {
-        ROS_WARN("Unsupported message type '%s' for topic '%s'", msg_type.c_str(), topic.c_str());
-        continue;
-      }
-
-      int width = 0, height = 0;
+      int width, height;
       if (!get_image_size(resolution, width, height)) {
-        ROS_WARN(
-          "Failed to parse resolution '%s' for topic: %s", resolution.c_str(),
-          topic.c_str());
+        ROS_INFO("resolution format error: '%s'", resolution.c_str());
         continue;
       }
-      ROS_INFO("topic: %s, image size : %d*%d", topic.c_str(), width, height);
-
-      std::string pub_topic = topic + "/h264";
-      encoder_map_.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(pub_topic),
-        std::forward_as_tuple(width, height, bitrate_, output_fps_));
-      ros::Publisher pub = nh_.advertise<CompressedVideo>(pub_topic, 1);
-      ros::Subscriber sub;
-      if (msg_type == "sensor_msgs/CompressedImage") {
-        sub = nh_.subscribe<sensor_msgs::CompressedImage>(
-          topic, 1,
-          [this, pub_topic, height](const sensor_msgs::CompressedImage::ConstPtr & msg)
-          {
-            if (encoding_enabled_) {
-              cv::Mat decoded_img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_UNCHANGED);
-              process_image(decoded_img, pub_topic, height);
-            }
-          });
-      } else {
-        sub = nh_.subscribe<sensor_msgs::Image>(
-          topic, 1,
-          [this, pub_topic, height](const sensor_msgs::Image::ConstPtr & msg)
-          {
-            if (encoding_enabled_) {
-              process_image(convertToCvMat(*msg), pub_topic, height);
-            }
-          });
-      }
-      subscribers_.emplace_back(sub);
-      publisher_map_.emplace(pub_topic, pub);
+      topic_resolution_[topic] = std::make_pair(width, height);
     }
 
-    for (const auto & pub_topic : sub_topics_) {
-      if (timer_map_.find(pub_topic) == timer_map_.end()) {
-        auto timer = nh_.createTimer(
-          interval,
-          [this, pub_topic](const ros::TimerEvent &)
-          {
-            if (encoding_enabled_) {
-              auto frame = encoder_map_[pub_topic + "/h264"].
-              encode_frame();
-              if (frame) {
-                publisher_map_[pub_topic + "/h264"].publish(*frame);
-              }
-            }
-          }, false, true);
-        timer_map_.emplace(pub_topic, timer);
-      }
-    }
+    retry_timer_ = nh_.createTimer(ros::Duration(5.0), &CoEncoder::retry_subscribe_topics, this);
+
+    retry_subscribe_topics(ros::TimerEvent());
 
     encoder_ctrl_ = nh_.advertiseService<std_srvs::SetBool::Request, std_srvs::SetBool::Response>(
       "encoder_ctrl", [this](std_srvs::SetBool::Request & req, std_srvs::SetBool::Response & res)
@@ -151,6 +101,122 @@ public:
   }
 
   ~CoEncoder() = default;
+
+
+  void retry_subscribe_topics(const ros::TimerEvent &)
+  {
+    if (pending_topics_.empty()) {
+      retry_timer_.stop();
+      ROS_INFO("All topics subscribed successfully, stop retry timer.");
+      return;
+    }
+
+    get_all_topics_and_type();
+
+    for (auto it = pending_topics_.begin(); it != pending_topics_.end(); ) {
+      const std::string & topic = *it;
+      auto topic_it = topic_map_.find(topic);
+
+      if (topic_it == topic_map_.end()) {
+        ROS_DEBUG("Topic %s not found in ROS master, will retry.", topic.c_str());
+        ++it;
+        continue;
+      }
+
+      std::string topic_type = topic_it->second;
+      if (topic_type != "sensor_msgs/Image" && topic_type != "sensor_msgs/CompressedImage") {
+        ROS_WARN(
+          "Unsupported message type '%s' for topic '%s', will retry",
+          topic_type.c_str(), topic.c_str());
+        ++it;
+        continue;
+      }
+
+      if (std::find_if(
+          subscribers_.begin(), subscribers_.end(),
+          [&topic](const ros::Subscriber & s) {
+            return s.getTopic() == topic;
+          }) != subscribers_.end())
+      {
+        ROS_DEBUG("Topic %s already subscribed, removing from pending list.", topic.c_str());
+        it = pending_topics_.erase(it);
+        continue;
+      }
+
+      auto resolution_it = topic_resolution_.find(topic);
+      if (resolution_it == topic_resolution_.end()) {
+        ROS_WARN("No resolution found for topic %s, will retry", topic.c_str());
+        ++it;
+        continue;
+      }
+
+      const auto & resolution = resolution_it->second;
+      std::string pub_topic = topic + "/h264";
+
+      if (publisher_map_.count(pub_topic) == 0) {
+        ros::Publisher pub = nh_.advertise<CompressedVideo>(pub_topic, 1);
+        publisher_map_.emplace(pub_topic, pub);
+      }
+
+      if (encoder_map_.count(pub_topic) == 0) {
+        encoder_map_.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(pub_topic),
+          std::forward_as_tuple(resolution.first, resolution.second, bitrate_, output_fps_));
+      }
+
+      ros::Subscriber sub;
+      bool subscribe_success = false;
+
+      if (topic_type == "sensor_msgs/Image") {
+        sub = nh_.subscribe<sensor_msgs::Image>(
+          topic, 1,
+          [this, pub_topic](const sensor_msgs::Image::ConstPtr & msg)
+          {
+            if (encoding_enabled_) {
+              process_image(convertToCvMat(*msg), pub_topic);
+            }
+          });
+        subscribe_success = true;
+      } else if (topic_type == "sensor_msgs/CompressedImage") {
+        sub = nh_.subscribe<sensor_msgs::CompressedImage>(
+          topic, 1,
+          [this, pub_topic](const sensor_msgs::CompressedImage::ConstPtr & msg)
+          {
+            if (encoding_enabled_) {
+              cv::Mat decoded_img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_UNCHANGED);
+              process_image(decoded_img, pub_topic);
+            }
+          });
+        subscribe_success = true;
+      }
+
+      if (subscribe_success) {
+        subscribers_.emplace_back(sub);
+
+        if (timer_map_.count(pub_topic) == 0) {
+          auto timer = nh_.createTimer(
+            ros::Duration(1.0 / static_cast<double>(output_fps_)),
+            [this, pub_topic](const ros::TimerEvent &)
+            {
+              if (encoding_enabled_) {
+                auto frame = encoder_map_[pub_topic].encode_frame();
+                if (frame) {
+                  publisher_map_[pub_topic].publish(*frame);
+                }
+              }
+            }, false, true);
+          timer_map_.emplace(pub_topic, timer);
+        }
+
+        ROS_INFO("Successfully subscribed topic: %s (type: %s)", topic.c_str(), topic_type.c_str());
+        it = pending_topics_.erase(it);
+      } else {
+        ROS_WARN("Failed to subscribe topic: %s, will retry", topic.c_str());
+        ++it;
+      }
+    }
+  }
 
 private:
   static cv::Mat convertToCvMat(const sensor_msgs::Image & img_msg)
@@ -177,8 +243,7 @@ private:
     return image;
   }
 
-
-  void process_image(cv::Mat img, const std::string & pub_topic, int height)
+  void process_image(cv::Mat img, const std::string & pub_topic)
   {
     if (img.empty()) {
       ROS_WARN("Empty image received");
@@ -219,6 +284,7 @@ private:
 
   void get_all_topics_and_type()
   {
+    topic_map_.clear();
     ros::master::V_TopicInfo topics;
     ros::master::getTopics(topics);
 
@@ -274,15 +340,25 @@ private:
   std::map<std::string, H264Encoder> encoder_map_;
   std::map<std::string, ros::Timer> timer_map_;
 
+  std::unordered_map<std::string, std::pair<int, int>> topic_resolution_;
+
   std::map<std::string, std::string> topic_map_;
 
   int output_fps_ = 30, bitrate_ = 800000, depth_image_max_val_ = 10000;
+
+  std::vector<std::string> pending_topics_;
+  ros::Timer retry_timer_;
 };
 
 int main(int argc, char ** argv)
 {
   ros::init(argc, argv, "coencoder");
-  CoEncoder node;
-  ros::spin();
+
+  try {
+    CoEncoder node;
+    ros::spin();
+  } catch (const std::exception & e) {
+    ROS_ERROR("Exception in main: %s", e.what());
+  }
   return 0;
 }
