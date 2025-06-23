@@ -27,7 +27,6 @@
 #include <unordered_map>
 #include <utility>
 #include "encoder.hpp"
-#include "singleton_lock.hpp"
 
 extern "C"
 {
@@ -354,14 +353,6 @@ private:
 int main(int argc, char ** argv)
 {
   ros::init(argc, argv, "coencoder");
-
-  coscene::SingletonLock lock("coencoder");
-  if (!lock.acquire()) {
-    ROS_ERROR("Failed to acquire singleton lock. Another instance may be running.");
-    return 1;
-  }
-
-  lock.setup_signal_handlers([]() {ros::shutdown();});
 
   try {
     CoEncoder node;
