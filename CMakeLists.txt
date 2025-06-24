@@ -83,7 +83,7 @@ elseif("$ENV{ROS_VERSION}" STREQUAL "2")
     )
 
     target_link_libraries(coencoder
-            ${OpenCV_LIBS}
+            ${OpenCV_LIBRARIES}
             ${AVFORMAT_LIBRARIES}
             ${AVCODEC_LIBRARIES}
             ${AVUTIL_LIBRARIES}
