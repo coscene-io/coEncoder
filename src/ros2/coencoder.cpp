@@ -18,6 +18,7 @@
 #include <map>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <algorithm>
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
@@ -250,7 +251,7 @@ private:
         });
       image_sub_.emplace_back(img_sub);
       RCLCPP_INFO(this->get_logger(), "Successfully subscribed topic: %s", topic.c_str());
-    } catch (const std::exception& e) {
+    } catch (const std::exception & e) {
       RCLCPP_WARN(this->get_logger(), "subscribe topic [%s] failed: %s", topic.c_str(), e.what());
       return false;
     }
@@ -279,7 +280,7 @@ private:
         });
       comp_image_sub_.emplace_back(comp_sub);
       RCLCPP_INFO(this->get_logger(), "Successfully subscribed topic: %s", topic.c_str());
-    } catch (const std::exception& e) {
+    } catch (const std::exception & e) {
       RCLCPP_WARN(this->get_logger(), "subscribe topic [%s] failed: %s", topic.c_str(), e.what());
       return false;
     }
