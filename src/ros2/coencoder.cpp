@@ -18,6 +18,7 @@
 #include <map>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <algorithm>
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
@@ -34,6 +35,9 @@
 #include <utility>
 #include <unordered_map>
 #include "encoder.hpp"
+
+constexpr size_t DEFAULT_MIN_QOS_DEPTH = 1;
+constexpr size_t DEFAULT_MAX_QOS_DEPTH = 25;
 
 class CoEncoder : public rclcpp::Node
 {
@@ -237,14 +241,20 @@ private:
       return false;
     }
 
-    auto img_sub = this->create_subscription<sensor_msgs::msg::Image>(
-      topic, 10,
-      [this, pub_topic](sensor_msgs::msg::Image::SharedPtr msg)
-      {
-        process_image(msg, pub_topic);
-      });
-
-    image_sub_.emplace_back(img_sub);
+    try {
+      const auto qos = get_publisher_qos(topic);
+      auto img_sub = this->create_subscription<sensor_msgs::msg::Image>(
+        topic, qos,
+        [this, pub_topic](sensor_msgs::msg::Image::SharedPtr msg)
+        {
+          process_image(msg, pub_topic);
+        });
+      image_sub_.emplace_back(img_sub);
+      RCLCPP_INFO(this->get_logger(), "Successfully subscribed topic: %s", topic.c_str());
+    } catch (const std::exception & e) {
+      RCLCPP_WARN(this->get_logger(), "subscribe topic [%s] failed: %s", topic.c_str(), e.what());
+      return false;
+    }
     return true;
   }
 
@@ -260,14 +270,20 @@ private:
       return false;
     }
 
-    auto comp_sub = this->create_subscription<sensor_msgs::msg::CompressedImage>(
-      topic, 10,
-      [this, pub_topic](sensor_msgs::msg::CompressedImage::SharedPtr msg)
-      {
-        process_compressed_image(msg, pub_topic);
-      });
-
-    comp_image_sub_.emplace_back(comp_sub);
+    try {
+      const auto qos = get_publisher_qos(topic);
+      auto comp_sub = this->create_subscription<sensor_msgs::msg::CompressedImage>(
+        topic, qos,
+        [this, pub_topic](sensor_msgs::msg::CompressedImage::SharedPtr msg)
+        {
+          process_compressed_image(msg, pub_topic);
+        });
+      comp_image_sub_.emplace_back(comp_sub);
+      RCLCPP_INFO(this->get_logger(), "Successfully subscribed topic: %s", topic.c_str());
+    } catch (const std::exception & e) {
+      RCLCPP_WARN(this->get_logger(), "subscribe topic [%s] failed: %s", topic.c_str(), e.what());
+      return false;
+    }
     return true;
   }
 
@@ -328,6 +344,71 @@ private:
 
     cv::Mat mat(height, width, cv_type, const_cast<uint8_t *>(data), msg.step);
     return mat;
+  }
+
+  rclcpp::QoS get_publisher_qos(const std::string & topic)
+  {
+    // Select an appropriate subscription QOS profile. This is similar to how ros2 topic echo
+    // does it:
+    // https://github.com/ros2/ros2cli/blob/619b3d1c9/ros2topic/ros2topic/verb/echo.py#L137-L194
+    size_t depth = 0;
+    size_t reliability_reliable_endpoints_count = 0;
+    size_t durability_transient_local_endpoints_count = 0;
+
+    const auto publisher_info = this->get_publishers_info_by_topic(topic);
+    for (const auto & publisher : publisher_info) {
+      const auto & qos = publisher.qos_profile();
+      if (qos.get_rmw_qos_profile().reliability == RMW_QOS_POLICY_RELIABILITY_RELIABLE) {
+        ++reliability_reliable_endpoints_count;
+      }
+      if (qos.get_rmw_qos_profile().durability == RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL) {
+        ++durability_transient_local_endpoints_count;
+      }
+      const size_t publisher_history_depth = std::max(1ul, qos.get_rmw_qos_profile().depth);
+      depth = depth + publisher_history_depth;
+    }
+
+    depth = std::max(depth, DEFAULT_MIN_QOS_DEPTH);
+    if (depth > DEFAULT_MAX_QOS_DEPTH) {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Limiting history depth for topic '%s' to %zu (was %zu). You may want to increase "
+        "the max_qos_depth parameter value.",
+        topic.c_str(), DEFAULT_MAX_QOS_DEPTH, depth);
+      depth = DEFAULT_MAX_QOS_DEPTH;
+    }
+
+    rclcpp::QoS qos{rclcpp::KeepLast(depth)};
+
+    // If all endpoints are reliable, ask for reliable
+    if (reliability_reliable_endpoints_count == publisher_info.size()) {
+      qos.reliable();
+    } else {
+      if (reliability_reliable_endpoints_count > 0) {
+        RCLCPP_WARN(
+          this->get_logger(),
+          "Some, but not all, publishers on topic '%s' are offering QoSReliabilityPolicy.RELIABLE. "
+          "Falling back to QoSReliabilityPolicy.BEST_EFFORT as it will connect to all publishers",
+          topic.c_str());
+      }
+      qos.best_effort();
+    }
+
+    // If all endpoints are transient_local, ask for transient_local
+    if (durability_transient_local_endpoints_count == publisher_info.size()) {
+      qos.transient_local();
+    } else {
+      if (durability_transient_local_endpoints_count > 0) {
+        RCLCPP_WARN(
+          this->get_logger(),
+          "Some, but not all, publishers on topic '%s' are offering "
+          "QoSDurabilityPolicy.TRANSIENT_LOCAL. Falling back to "
+          "QoSDurabilityPolicy.VOLATILE as it will connect to all publishers",
+          topic.c_str());
+      }
+      qos.durability_volatile();
+    }
+    return qos;
   }
 
   static std::string format_topics(const std::vector<std::string> & topics)
