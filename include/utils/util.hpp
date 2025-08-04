@@ -1,0 +1,56 @@
+#pragma once
+
+#include <string>
+#include <cstring>
+#include <stdexcept>
+#include <sys/stat.h>
+
+inline void create_directory(const std::string& path) {
+  std::string dir_path = path;
+  const size_t last_slash = path.find_last_of('/');
+  if (last_slash != std::string::npos) {
+    dir_path = path.substr(0, last_slash);
+  }
+  
+  struct stat st;
+  if (stat(dir_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+    return;
+  }
+
+  size_t pos = 0;
+  while ((pos = path.find('/', pos + 1)) != std::string::npos) {
+    std::string sub_dir = path.substr(0, pos);
+    if (!sub_dir.empty()) {
+      const int ret = mkdir(sub_dir.c_str(), 0755);
+      if (ret == -1 && errno != EEXIST) {
+        std::string error_msg = "Failed to create log directory: " + path +
+                               " (errno: " + std::to_string(errno) +
+                               ", " + std::strerror(errno) + ")";
+        throw std::runtime_error(error_msg);
+      }
+    }
+  }
+}
+
+
+template<typename T>
+struct SetDiff {
+  std::vector<T> missing;
+  std::vector<T> added;
+
+  bool isIdentical() const {
+    return missing.empty() && added.empty();
+  }
+};
+
+template<typename T>
+SetDiff<T> findSetsDifference(const std::set<T>& A, const std::set<T>& B) {
+  SetDiff<T> result;
+
+  std::set_difference(A.begin(), A.end(), B.begin(), B.end(),
+                      std::inserter(result.missing, result.missing.begin()));
+
+  std::set_difference(B.begin(), B.end(), A.begin(), A.end(),
+                      std::inserter(result.added, result.added.begin()));
+  return result;
+}
