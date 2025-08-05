@@ -24,13 +24,15 @@
 
 #ifdef ROS_VERSION_1
 #include <ros/ros.h>
-#include <coscene_msgs/CompressedVideo.h>
-using CompressedVideo = coscene_msgs::CompressedVideo;
+// #include <coscene_msgs/CompressedVideo.h>
+// using CompressedVideo = coscene_msgs::CompressedVideo;
+#include <foxglove_msgs/CompressedVideo.h>
+using CompressedVideo = foxglove_msgs::CompressedVideo;
 #else
 #include <rclcpp/rclcpp.hpp>
 // #include <coscene_msgs/msg/compressed_video.h>
-#include <foxglove_msgs/msg/compressed_video.h>
 // using CompressedVideo = coscene_msgs::msg::CompressedVideo;
+#include <foxglove_msgs/msg/compressed_video.h>
 using CompressedVideo = foxglove_msgs::msg::CompressedVideo;
 #endif
 
