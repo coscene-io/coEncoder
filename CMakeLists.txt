@@ -48,6 +48,7 @@ if("$ENV{ROS_VERSION}" STREQUAL "1")
     target_include_directories(coencoder
             SYSTEM PRIVATE
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor>
             $<INSTALL_INTERFACE:include>
             ${catkin_INCLUDE_DIRS}
     )
@@ -89,6 +90,7 @@ elseif("$ENV{ROS_VERSION}" STREQUAL "2")
 
     target_include_directories(coencoder PRIVATE
             ${PROJECT_SOURCE_DIR}/include
+            ${PROJECT_SOURCE_DIR}/vendor
             ${OpenCV_INCLUDE_DIRS}
     )
 

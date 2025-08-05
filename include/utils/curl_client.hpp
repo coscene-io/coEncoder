@@ -20,7 +20,7 @@
 #include <iostream>
 #include <curl/curl.h>
 
-#include "utils/json.hpp"
+#include "json.hpp"
 
 struct HttpResponse
 {
@@ -34,7 +34,8 @@ struct HttpResponse
 class CurlClient
 {
 public:
-  CurlClient() : curl_(nullptr), header_list_(nullptr), timeout_seconds_(30), verify_ssl_(false)
+  CurlClient()
+  : curl_(nullptr), header_list_(nullptr), timeout_seconds_(30), verify_ssl_(false)
   {
     if (!initCurl()) {
       throw std::runtime_error("Failed to initialize CURL");
@@ -47,10 +48,11 @@ public:
   }
 
   CurlClient(const CurlClient &) = delete;
-  CurlClient& operator=(const CurlClient &) = delete;
+  CurlClient & operator=(const CurlClient &) = delete;
 
-  HttpResponse get(const std::string & url,
-                   const std::map<std::string, std::string> & headers = {})
+  HttpResponse get(
+    const std::string & url,
+    const std::map<std::string, std::string> & headers = {})
   {
     if (!curl_) {
       return HttpResponse{0, "", {}, false, "CURL not initialized"};
@@ -73,16 +75,18 @@ public:
     return executeRequest();
   }
 
-  HttpResponse post(const std::string & url,
-                    const nlohmann::json & data,
-                    const std::map<std::string, std::string> & headers = {})
+  HttpResponse post(
+    const std::string & url,
+    const nlohmann::json & data,
+    const std::map<std::string, std::string> & headers = {})
   {
     return post(url, data.dump(), headers);
   }
 
-  HttpResponse post(const std::string & url,
-                    const std::string & data,
-                    const std::map<std::string, std::string> & headers = {})
+  HttpResponse post(
+    const std::string & url,
+    const std::string & data,
+    const std::map<std::string, std::string> & headers = {})
   {
     if (!curl_) {
       return HttpResponse{0, "", {}, false, "CURL not initialized"};
@@ -129,8 +133,8 @@ public:
   }
 
 private:
-  CURL* curl_;
-  struct curl_slist* header_list_;
+  CURL * curl_;
+  struct curl_slist * header_list_;
   int timeout_seconds_;
   bool verify_ssl_;
 
@@ -152,40 +156,40 @@ private:
     std::string response_body;
     std::map<std::string, std::string> response_headers;
 
-    auto write_callback = [](void* contents, size_t size, size_t nmemb,
-                             std::string* userp) -> size_t
-    {
-      size_t totalSize = size * nmemb;
-      userp->append(reinterpret_cast<char*>(contents), totalSize);
-      return totalSize;
-    };
+    auto write_callback = [](void * contents, size_t size, size_t nmemb,
+        std::string * userp) -> size_t
+      {
+        size_t totalSize = size * nmemb;
+        userp->append(reinterpret_cast<char *>(contents), totalSize);
+        return totalSize;
+      };
 
-    auto header_callback = [](char* buffer, size_t size, size_t nitems,
-                              std::map<std::string, std::string>* headers) -> size_t
-    {
-      std::string header_line(buffer, size * nitems);
+    auto header_callback = [](char * buffer, size_t size, size_t nitems,
+        std::map<std::string, std::string> * headers) -> size_t
+      {
+        std::string header_line(buffer, size * nitems);
 
-      if (!header_line.empty() && header_line.back() == '\n') {
-        header_line.pop_back();
-      }
-      if (!header_line.empty() && header_line.back() == '\r') {
-        header_line.pop_back();
-      }
+        if (!header_line.empty() && header_line.back() == '\n') {
+          header_line.pop_back();
+        }
+        if (!header_line.empty() && header_line.back() == '\r') {
+          header_line.pop_back();
+        }
 
-      size_t colon_pos = header_line.find(':');
-      if (colon_pos != std::string::npos) {
-        std::string key = header_line.substr(0, colon_pos);
-        std::string value = header_line.substr(colon_pos + 1);
+        size_t colon_pos = header_line.find(':');
+        if (colon_pos != std::string::npos) {
+          std::string key = header_line.substr(0, colon_pos);
+          std::string value = header_line.substr(colon_pos + 1);
 
-        key.erase(0, key.find_first_not_of(" \t"));
-        key.erase(key.find_last_not_of(" \t") + 1);
-        value.erase(0, value.find_first_not_of(" \t"));
-        value.erase(value.find_last_not_of(" \t") + 1);
+          key.erase(0, key.find_first_not_of(" \t"));
+          key.erase(key.find_last_not_of(" \t") + 1);
+          value.erase(0, value.find_first_not_of(" \t"));
+          value.erase(value.find_last_not_of(" \t") + 1);
 
-        (*headers)[key] = value;
-      }
-      return size * nitems;
-    };
+          (*headers)[key] = value;
+        }
+        return size * nitems;
+      };
 
     curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, +write_callback);
     curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &response_body);
@@ -203,7 +207,7 @@ private:
         response.error_message = curl_easy_strerror(res);
         response.status_code = 0;
       } else {
-        long http_code = 0;
+        int http_code = 0;
         curl_easy_getinfo(curl_, CURLINFO_RESPONSE_CODE, &http_code);
         response.status_code = static_cast<int>(http_code);
         response.success = (http_code >= 200 && http_code < 300);

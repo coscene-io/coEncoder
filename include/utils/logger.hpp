@@ -38,13 +38,14 @@ enum class LogLevel
 class Logger
 {
 public:
-  static Logger& getInstance()
+  static Logger & getInstance()
   {
     static Logger instance;
     return instance;
   }
 
-  Logger() : log_dir_("/tmp/colistener/logs/"), current_level_(LogLevel::INFO)
+  Logger()
+  : log_dir_("/tmp/colistener/logs/"), current_level_(LogLevel::INFO)
   {
     create_directory(log_dir_);
   }
@@ -57,9 +58,10 @@ public:
   }
 
   Logger(const Logger &) = delete;
-  Logger& operator=(const Logger &) = delete;
+  Logger & operator=(const Logger &) = delete;
 
-  void log(LogLevel level, const std::string & message) {
+  void log(LogLevel level, const std::string & message)
+  {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (!should_log(level, current_level_)) {
@@ -69,14 +71,15 @@ public:
     check_and_rotate_log();
 
     if (current_file_.is_open()) {
-      current_file_ << get_current_time_str() << " "
-          << "[" << get_level_string(level) << "] "
-          << message << std::endl;
+      current_file_ << get_current_time_str() << " " <<
+        "[" << get_level_string(level) << "] " <<
+        message << std::endl;
       current_file_.flush();
     }
   }
 
-  void set_log_dir(const std::string & dir) {
+  void set_log_dir(const std::string & dir)
+  {
     std::lock_guard<std::mutex> lock(mutex_);
     if (current_file_.is_open()) {
       current_file_.close();
@@ -88,7 +91,8 @@ public:
     create_directory(log_dir_);
   }
 
-  void set_log_level(const std::string & level) {
+  void set_log_level(const std::string & level)
+  {
     std::lock_guard<std::mutex> lock(mutex_);
     if (level == "Debug") {
       current_level_ = LogLevel::DEBUG;
@@ -101,11 +105,11 @@ public:
     }
   }
 
-  void set_log_level(const LogLevel level) {
+  void set_log_level(const LogLevel level)
+  {
     std::lock_guard<std::mutex> lock(mutex_);
     current_level_ = level;
   }
-
 
 private:
   std::string log_dir_;
@@ -114,7 +118,8 @@ private:
   std::string current_date_;
   LogLevel current_level_;
 
-  void check_and_rotate_log() {
+  void check_and_rotate_log()
+  {
     const std::string date = get_current_date_str();
     if (date != current_date_ || !current_file_.is_open()) {
       if (current_file_.is_open()) {
@@ -129,18 +134,19 @@ private:
     }
   }
 
-  void clean_old_logs() const {
+  void clean_old_logs() const
+  {
     const int max_days = 7;
-    DIR* dir = opendir(log_dir_.c_str());
+    DIR * dir = opendir(log_dir_.c_str());
     if (dir == nullptr) {
       return;
     }
 
-    struct dirent* entry;
+    struct dirent * entry;
     while ((entry = readdir(dir)) != nullptr) {
       if (entry->d_type == DT_REG) {
         std::string filepath = log_dir_ + entry->d_name;
-        struct stat file_stat{};
+        struct stat file_stat {};
         if (stat(filepath.c_str(), &file_stat) == 0) {
           const auto now = std::time(nullptr);
           const double days = difftime(now, file_stat.st_mtime) / (60 * 60 * 24);
@@ -171,7 +177,7 @@ private:
     gettimeofday(&tv, nullptr);
 
     time_t rawtime = tv.tv_sec;
-    struct tm* timeinfo = std::localtime(&rawtime);
+    struct tm * timeinfo = std::localtime(&rawtime);
 
     char buffer[100];
     std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
@@ -187,7 +193,7 @@ private:
   static std::string get_current_date_str()
   {
     std::time_t time = std::time(nullptr);
-    struct tm* timeinfo = std::localtime(&time);
+    struct tm * timeinfo = std::localtime(&time);
     char buffer[80];
     std::strftime(buffer, sizeof(buffer), "%Y-%m-%d", timeinfo);
     return std::string(buffer);
@@ -199,45 +205,46 @@ private:
     return log_dir_ + "coencoder_" + date + ".log";
   }
 
-  static bool should_log(LogLevel msg_level, LogLevel filter_level) {
+  static bool should_log(LogLevel msg_level, LogLevel filter_level)
+  {
     return static_cast<int>(msg_level) >= static_cast<int>(filter_level);
   }
 };
 
-inline const char* get_filename(const char* path)
+inline const char * get_filename(const char * path)
 {
-  const char* filename = strrchr(path, '/');
+  const char * filename = strrchr(path, '/');
   return filename ? filename + 1 : path;
 }
 
-inline std::string format_string(const char* file, int line, const char* msg)
+inline std::string format_string(const char * file, int line, const char * msg)
 {
   return std::string("[") + get_filename(file) + ":" + std::to_string(line) + "] " + msg;
 }
 
-template <typename... Args>
-std::string format_string(const char* file, int line, const char* format, Args... args)
+template<typename ... Args>
+std::string format_string(const char * file, int line, const char * format, Args... args)
 {
-  int size = snprintf(nullptr, 0, format, args...) + 1;
+  int size = snprintf(nullptr, 0, format, args ...) + 1;
   if (size <= 0) {
     return "Format Error";
   }
   std::vector<char> buf(size);
-  snprintf(buf.data(), size, format, args...);
+  snprintf(buf.data(), size, format, args ...);
   return std::string("[") + get_filename(file) + ":" + std::to_string(line) + "] " +
-    std::string(buf.data(), buf.data() + size - 1);
+         std::string(buf.data(), buf.data() + size - 1);
 }
 
 #define COLOG_INFO(...) \
-    Logger::getInstance().log(LogLevel::INFO, format_string(__FILE__, __LINE__, __VA_ARGS__))
+  Logger::getInstance().log(LogLevel::INFO, format_string(__FILE__, __LINE__, __VA_ARGS__))
 
 #define COLOG_WARN(...) \
-    Logger::getInstance().log(LogLevel::WARN, format_string(__FILE__, __LINE__, __VA_ARGS__))
+  Logger::getInstance().log(LogLevel::WARN, format_string(__FILE__, __LINE__, __VA_ARGS__))
 
 #define COLOG_ERROR(...) \
-    Logger::getInstance().log(LogLevel::ERROR, format_string(__FILE__, __LINE__, __VA_ARGS__))
+  Logger::getInstance().log(LogLevel::ERROR, format_string(__FILE__, __LINE__, __VA_ARGS__))
 
 #define COLOG_DEBUG(...) \
-    Logger::getInstance().log(LogLevel::DEBUG, format_string(__FILE__, __LINE__, __VA_ARGS__))
+  Logger::getInstance().log(LogLevel::DEBUG, format_string(__FILE__, __LINE__, __VA_ARGS__))
 
 #endif  // UTILS__LOGGER_HPP_

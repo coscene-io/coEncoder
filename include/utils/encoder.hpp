@@ -19,6 +19,7 @@
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <chrono>
+#include <string>
 #include <utils/logger.hpp>
 
 #ifdef ROS_VERSION_1
@@ -35,8 +36,7 @@ using CompressedVideo = foxglove_msgs::msg::CompressedVideo;
 
 using CompressedVideoPtr = std::shared_ptr<CompressedVideo>;
 
-extern "C"
-{
+extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
@@ -51,7 +51,9 @@ public:
     H264Encoder(640, 480, 1600000, "");
   }
 
-  H264Encoder(const int width, const int height, const int bitrate = 1600000, const std::string & topic = "")
+  H264Encoder(
+    const int width, const int height, const int bitrate = 1600000,
+    const std::string & topic = "")
   {
 #ifdef ROS_VERSION_1
     avcodec_register_all();
@@ -60,29 +62,27 @@ public:
     bitrate_ = bitrate;
     encoder_topic_ = topic;
 
-    const char* encoder_names[] = {
-        "h264_nvenc",    // NVIDIA NVENC
-        "h264_qsv",      // Intel Quick Sync
-        "h264_amf",      // AMD VCE
-        "h264_vaapi",    // VAAPI (Linux hardware acceleration)
-        "libx264"        // Software fallback
+    const char * encoder_names[] = {
+      "h264_nvenc",    // NVIDIA NVENC
+      "h264_qsv",      // Intel Quick Sync
+      "h264_amf",      // AMD VCE
+      "h264_vaapi",    // VAAPI (Linux hardware acceleration)
+      "libx264"        // Software fallback
     };
-    
-    codec_ = nullptr;
-    const char* selected_encoder = nullptr;
-    
-    for (const char* encoder_name : encoder_names) {
-        codec_ = avcodec_find_encoder_by_name(encoder_name);
-        if (codec_) {
-            COLOG_INFO("create encoder with [%s] for topic [%s]", encoder_name, topic.c_str());
-            selected_encoder = encoder_name;
-            encoder_name_ = encoder_name;  // Store encoder name
-            // is_hardware_encoder_ = (strcmp(encoder_name, "libx264") != 0);
 
-            break;
-        }
+    codec_ = nullptr;
+    const char * selected_encoder = nullptr;
+
+    for (const char * encoder_name : encoder_names) {
+      codec_ = avcodec_find_encoder_by_name(encoder_name);
+      if (codec_) {
+        COLOG_INFO("create encoder with [%s] for topic [%s]", encoder_name, topic.c_str());
+        selected_encoder = encoder_name;
+        encoder_name_ = encoder_name;
+        break;
+      }
     }
-    
+
     if (!codec_) {
       COLOG_INFO("No H.264 encoder found");
       throw std::runtime_error("No H.264 encoder found");
@@ -96,84 +96,69 @@ public:
 
     codec_context_->width = width;
     codec_context_->height = height;
-    
-    // Set bitrate for fixed bitrate encoding
+
     codec_context_->bit_rate = bitrate_;
     codec_context_->rc_max_rate = bitrate_;
     codec_context_->rc_min_rate = bitrate_;
-    codec_context_->rc_buffer_size = bitrate_; // Buffer size equal to bitrate for CBR
+    codec_context_->rc_buffer_size = bitrate_;
 
-    codec_context_->time_base = (AVRational){1, 30};
-    codec_context_->framerate = (AVRational){30, 1};
+    codec_context_->time_base = (AVRational) {1, 30};
+    codec_context_->framerate = (AVRational) {30, 1};
     codec_context_->gop_size = 30;
     codec_context_->max_b_frames = 0;
 
-    // if (is_hardware_encoder_) {
-        if (strcmp(selected_encoder, "h264_nvenc") == 0) {
-            codec_context_->pix_fmt = AV_PIX_FMT_NV12;
-        } else if (strcmp(selected_encoder, "h264_qsv") == 0) {
-            codec_context_->pix_fmt = AV_PIX_FMT_NV12;
-        } else if (strcmp(selected_encoder, "h264_vaapi") == 0) {
-            codec_context_->pix_fmt = AV_PIX_FMT_VAAPI;
-        } else {
-            codec_context_->pix_fmt = AV_PIX_FMT_YUV420P;
-        }
-    // } else {
-        // codec_context_->pix_fmt = AV_PIX_FMT_YUV420P;
-    // }
+    if (strcmp(selected_encoder, "h264_nvenc") == 0) {
+      codec_context_->pix_fmt = AV_PIX_FMT_NV12;
+    } else if (strcmp(selected_encoder, "h264_qsv") == 0) {
+      codec_context_->pix_fmt = AV_PIX_FMT_NV12;
+    } else if (strcmp(selected_encoder, "h264_vaapi") == 0) {
+      codec_context_->pix_fmt = AV_PIX_FMT_VAAPI;
+    } else {
+      codec_context_->pix_fmt = AV_PIX_FMT_YUV420P;
+    }
 
     AVDictionary * codecOpts = nullptr;
 
     if (strcmp(selected_encoder, "h264_nvenc") == 0) {
-        // NVIDIA NVENC specific settings
-        av_dict_set(&codecOpts, "preset", "llhq", 0);  // Low latency high quality
-        av_dict_set(&codecOpts, "tune", "ll", 0);      // Low latency
-        av_dict_set(&codecOpts, "rc", "cbr", 0);       // Constant bitrate
-        av_dict_set(&codecOpts, "profile", "baseline", 0);
-        av_dict_set(&codecOpts, "b_ref_mode", "disabled", 0);  // Disable B-frames
-        
+      av_dict_set(&codecOpts, "preset", "llhq", 0);  // Low latency high quality
+      av_dict_set(&codecOpts, "tune", "ll", 0);      // Low latency
+      av_dict_set(&codecOpts, "rc", "cbr", 0);       // Constant bitrate
+      av_dict_set(&codecOpts, "profile", "baseline", 0);
     } else if (strcmp(selected_encoder, "h264_qsv") == 0) {
-        // Intel Quick Sync specific settings
-        av_dict_set(&codecOpts, "preset", "veryfast", 0);
-        av_dict_set(&codecOpts, "profile", "baseline", 0);
-        av_dict_set(&codecOpts, "async_depth", "1", 0);
-        av_dict_set(&codecOpts, "look_ahead", "0", 0);
-        av_dict_set(&codecOpts, "ratecontrol", "cbr", 0);
-        
+      av_dict_set(&codecOpts, "preset", "veryfast", 0);
+      av_dict_set(&codecOpts, "profile", "baseline", 0);
+      av_dict_set(&codecOpts, "async_depth", "1", 0);
+      av_dict_set(&codecOpts, "look_ahead", "0", 0);
+      av_dict_set(&codecOpts, "ratecontrol", "cbr", 0);
     } else if (strcmp(selected_encoder, "h264_amf") == 0) {
-        // AMD VCE specific settings
-        av_dict_set(&codecOpts, "quality", "speed", 0);
-        av_dict_set(&codecOpts, "rc", "cbr", 0);
-        av_dict_set(&codecOpts, "profile", "baseline", 0);
-        
+      av_dict_set(&codecOpts, "quality", "speed", 0);
+      av_dict_set(&codecOpts, "rc", "cbr", 0);
+      av_dict_set(&codecOpts, "profile", "baseline", 0);
     } else if (strcmp(selected_encoder, "h264_vaapi") == 0) {
-        // VAAPI specific settings
-        av_dict_set(&codecOpts, "profile", "baseline", 0);
-        av_dict_set(&codecOpts, "rc_mode", "CBR", 0);
-        
+      av_dict_set(&codecOpts, "profile", "baseline", 0);
+      av_dict_set(&codecOpts, "rc_mode", "CBR", 0);
     } else {
-        // Software encoder (libx264) settings
-        av_dict_set(&codecOpts, "tune", "zerolatency", 0);
-        av_dict_set(&codecOpts, "preset", "ultrafast", 0);
-        av_dict_set(&codecOpts, "profile", "baseline", 0);
-        av_dict_set(&codecOpts, "level", "4", 0);
-        av_dict_set(&codecOpts, "refs", "1", 0);
-        av_dict_set(&codecOpts, "me_method", "dia", 0);
-        av_dict_set(&codecOpts, "subq", "1", 0);
-        av_dict_set(&codecOpts, "trellis", "0", 0);
-        av_dict_set(&codecOpts, "aq-mode", "0", 0);
-        av_dict_set(&codecOpts, "me_range", "8", 0);
-        av_dict_set(&codecOpts, "weightb", "0", 0);
-        av_dict_set(&codecOpts, "8x8dct", "0", 0);
-        av_dict_set(&codecOpts, "fast-pskip", "1", 0);
+      av_dict_set(&codecOpts, "tune", "zerolatency", 0);
+      av_dict_set(&codecOpts, "preset", "ultrafast", 0);
+      av_dict_set(&codecOpts, "profile", "baseline", 0);
+      av_dict_set(&codecOpts, "level", "4", 0);
+      av_dict_set(&codecOpts, "refs", "1", 0);
+      av_dict_set(&codecOpts, "me_method", "dia", 0);
+      av_dict_set(&codecOpts, "subq", "1", 0);
+      av_dict_set(&codecOpts, "trellis", "0", 0);
+      av_dict_set(&codecOpts, "aq-mode", "0", 0);
+      av_dict_set(&codecOpts, "me_range", "8", 0);
+      av_dict_set(&codecOpts, "weightb", "0", 0);
+      av_dict_set(&codecOpts, "8x8dct", "0", 0);
+      av_dict_set(&codecOpts, "fast-pskip", "1", 0);
     }
 
     if (avcodec_open2(codec_context_, codec_, &codecOpts) < 0) {
-      av_dict_free(&codecOpts);  // Clean up options dict on failure
+      av_dict_free(&codecOpts);
       throw std::runtime_error("Could not open codec");
     }
-    
-    av_dict_free(&codecOpts);  // Clean up options dict after successful open
+
+    av_dict_free(&codecOpts);
 
     frame_ = av_frame_alloc();
     if (!frame_) {
@@ -187,13 +172,13 @@ public:
     av_image_alloc(
       frame_->data, frame_->linesize, codec_context_->width,
       codec_context_->height, codec_context_->pix_fmt, 32);
-    
-    // Initialize timing variables - will be set on first frame
+
     start_time_ = std::chrono::high_resolution_clock::time_point();
     initialized_ = false;
-    
-    COLOG_INFO("H264 encoder initialized with bitrate: %d bps (%.2f Mbps)", 
-               bitrate_, bitrate_ / 1000000.0);
+
+    COLOG_INFO(
+      "H264 encoder initialized with bitrate: %d bps (%.2f Mbps)",
+      bitrate_, bitrate_ / 1000000.0);
   }
 
   ~H264Encoder()
@@ -212,79 +197,50 @@ public:
   {
     received_ = true;
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    // Initialize timing on first frame
+
     if (!initialized_) {
       start_time_ = std::chrono::high_resolution_clock::now();
       initialized_ = true;
     }
-    
-    // Convert input image to YUV format based on encoder requirements
+
     cv::Mat yuv_img;
-    
-    // Handle different input formats and convert to appropriate YUV format
+
     if (img.channels() == 1) {
-      // Grayscale image - convert to BGR first, then to YUV
       cv::Mat bgr_img;
       cv::cvtColor(img, bgr_img, cv::COLOR_GRAY2BGR);
-      
-      // if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
-      // if (is_hardware_encoder_ && (codec_context_->pix_fmt == AV_PIX_FMT_NV12)) {
-      //   cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
-      // } else {
-      //   cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
-      // }
       cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
     } else if (img.channels() == 3) {
-      // 3-channel image (BGR or RGB)
-      // if (is_hardware_encoder_ && (codec_context_->pix_fmt == AV_PIX_FMT_NV12)) {
-      //   cv::cvtColor(img, yuv_img, cv::COLOR_BGR2YUV_I420);
-      // } else {
-      //   cv::cvtColor(img, yuv_img, cv::COLOR_BGR2YUV_I420);
-      // }
       cv::cvtColor(img, yuv_img, cv::COLOR_BGR2YUV_I420);
     } else if (img.channels() == 4) {
-      // 4-channel image (BGRA or RGBA) - convert to BGR first
       cv::Mat bgr_img;
       cv::cvtColor(img, bgr_img, cv::COLOR_BGRA2BGR);
-
-      // if (is_hardware_encoder_ && (codec_context_->pix_fmt == AV_PIX_FMT_NV12)) {
-      //   cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
-      // } else {
-      //   cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
-      // }
       cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
     } else {
       COLOG_ERROR("Unsupported image channels: %d", img.channels());
       return;
     }
-    
-    if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
-    // if (is_hardware_encoder_ && (codec_context_->pix_fmt == AV_PIX_FMT_NV12)) {
-        // Handle NV12 format for hardware encoders
-        int y_size = codec_context_->width * codec_context_->height;
-        int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
-        
-        // Y plane
-        memcpy(frame_->data[0], yuv_img.data, y_size);
-        
-        // Interleaved UV plane for NV12
-        const uint8_t* u_src = yuv_img.data + y_size;
-        const uint8_t* v_src = yuv_img.data + y_size + uv_size;
-        uint8_t* uv_dst = frame_->data[1];
-        
-        for (int i = 0; i < uv_size; i++) {
-            uv_dst[i * 2] = u_src[i];     // U
-            uv_dst[i * 2 + 1] = v_src[i]; // V
-        }
-    } else {
-        // Standard YUV420P format for software encoders
-        int y_size = codec_context_->width * codec_context_->height;
-        int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 
-        memcpy(frame_->data[0], yuv_img.data, y_size);
-        memcpy(frame_->data[1], yuv_img.data + y_size, uv_size);
-        memcpy(frame_->data[2], yuv_img.data + y_size + uv_size, uv_size);
+    if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
+      int y_size = codec_context_->width * codec_context_->height;
+      int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
+
+      memcpy(frame_->data[0], yuv_img.data, y_size);
+
+      const uint8_t * u_src = yuv_img.data + y_size;
+      const uint8_t * v_src = yuv_img.data + y_size + uv_size;
+      uint8_t * uv_dst = frame_->data[1];
+
+      for (int i = 0; i < uv_size; i++) {
+        uv_dst[i * 2] = u_src[i];
+        uv_dst[i * 2 + 1] = v_src[i];
+      }
+    } else {
+      int y_size = codec_context_->width * codec_context_->height;
+      int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
+
+      memcpy(frame_->data[0], yuv_img.data, y_size);
+      memcpy(frame_->data[1], yuv_img.data + y_size, uv_size);
+      memcpy(frame_->data[2], yuv_img.data + y_size + uv_size, uv_size);
     }
   }
 
@@ -297,16 +253,14 @@ public:
     av_new_packet(&pkt, 0);
 
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    // Calculate PTS based on actual elapsed time since first frame
+
     auto current_time = std::chrono::high_resolution_clock::now();
     auto elapsed_time = current_time - start_time_;
     auto elapsed_milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_time);
-    
-    // Convert to codec time base (1ms)
+
     // 1ms = 1000 ticks per second, so use milliseconds directly
     frame_->pts = elapsed_milliseconds.count();
-    
+
     int ret = avcodec_send_frame(codec_context_, frame_);
     if (ret < 0) {
       return nullptr;
@@ -336,14 +290,12 @@ private:
   const AVCodec * codec_;
   AVFrame * frame_ = nullptr;
   AVCodecContext * codec_context_ = nullptr;
-  std::string encoder_name_;  // Store the selected encoder name
+  std::string encoder_name_;
   std::string encoder_topic_;
-  // bool is_hardware_encoder_ = false;  // Track if using hardware encoder
-  int bitrate_ = 2000000; // Default bitrate in bps (2 Mbps)
+  int bitrate_;
 
   std::mutex mutex_;
 
-  // Timing variables for dynamic frame rate
   std::chrono::high_resolution_clock::time_point start_time_;
   bool initialized_ = false;
 

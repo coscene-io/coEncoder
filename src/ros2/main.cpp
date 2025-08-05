@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <memory>
 #include "ros2/coencoder.hpp"
+#include "rclcpp/executors/multi_threaded_executor.hpp"
+
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
 
   try {
     auto node = std::make_shared<CoEncoder>();
-    RCLCPP_INFO(rclcpp::get_logger("MAIN"), "CoEncoder SPIN!");
-    rclcpp::spin(node);
+    RCLCPP_INFO(rclcpp::get_logger("MAIN"), "CoEncoder MultiThreadedExecutor SPIN!");
+
+    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
+    executor.add_node(node);
+    executor.spin();
   } catch (const std::exception & e) {
     RCLCPP_ERROR(rclcpp::get_logger("MAIN"), "Exception in main: %s", e.what());
   }

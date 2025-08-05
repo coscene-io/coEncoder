@@ -20,7 +20,9 @@ int main(int argc, char ** argv)
 
   try {
     CoEncoder node;
-    ros::spin();
+    ros::AsyncSpinner spinner(4);
+    spinner.start();
+    ros::waitForShutdown();
   } catch (const std::exception & e) {
     ROS_ERROR("Exception in main: %s", e.what());
   }
