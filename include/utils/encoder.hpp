@@ -63,10 +63,10 @@ public:
     encoder_topic_ = topic;
 
     const char * encoder_names[] = {
-      "h264_nvenc",    // NVIDIA NVENC
-      "h264_qsv",      // Intel Quick Sync
-      "h264_amf",      // AMD VCE
-      "h264_vaapi",    // VAAPI (Linux hardware acceleration)
+      // "h264_nvenc",    // NVIDIA NVENC
+      // "h264_qsv",      // Intel Quick Sync
+      // "h264_amf",      // AMD VCE
+      // "h264_vaapi",    // VAAPI (Linux hardware acceleration)
       "libx264"        // Software fallback
     };
 

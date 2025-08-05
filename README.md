@@ -53,13 +53,15 @@ If the system environment variable contains `HOME`, the config file is located a
 **Online configuration modification requires coScout v1.1.8 or later**
 * Online configuration editing
   * Organization Settings -> Devices -> Device Configuration  
-  ![img_0](./img/device-config.png)
+
+    ![img_0](./img/device-config.png)
   * Edit fields
-  ![img_1](./img/config-setting.png)
+  
+    ![img_1](./img/config-setting.png)
   In device configuration, add the `coEncoder` field as shown in the image above. Note that `coEncoder` is a sub-field of `plugin_config`.
   * Configuration validity
-    * The configuration must contain the `topics_param` field, and this field must be of array type.
-    * Elements in `topics_param` must have three fields: `input`, `output`, `bitrate`. `input` and `output` are strings, `bitrate` is an integer.
+    * The configuration MUST contain the `topics_param` field, and this field must be of array type.
+    * Elements in `topics_param` MUST have three fields: `input`, `output`, `bitrate`. `input` and `output` are strings, `bitrate` is an integer.
 
 ## Compile OR deb install
 

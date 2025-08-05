@@ -130,7 +130,7 @@ private:
         }
         const nlohmann::json encoder_config = response_json["plugin_config"]["coEncoder"];
         if (config_.update_config(encoder_config)) {
-          COLOG_DEBUG("new config arrived, update with:\n%s ", encoder_config.dump(2).c_str());
+          COLOG_INFO("new config arrived, update with:\n%s ", encoder_config.dump(2).c_str());
           update_logger(config_.log_directory_, config_.log_level_);
           if (!config_.save_config(config_file_path_)) {
             COLOG_WARN("save config failed!");
