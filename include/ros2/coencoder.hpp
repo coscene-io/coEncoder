@@ -55,17 +55,21 @@ using CompressedImage = sensor_msgs::msg::CompressedImage;
 class CoEncoder : public rclcpp::Node
 {
 public:
-  CoEncoder()
+  explicit CoEncoder(const std::string & config_path)
   : Node("coencoder")
   {
-    const char * home = std::getenv("HOME");
-    if (!home) {
-      COLOG_WARN(
-        "Failed to get HOME environment variable, "
-        "use default config directory `/tmp/coencoder/config/config.json`");
-      config_file_path_ = "/tmp/coencoder/config/config.json";
+    if (config_path.empty()) {
+      const char * home = std::getenv("HOME");
+      if (!home) {
+        COLOG_WARN(
+          "Failed to get HOME environment variable, "
+          "use default config directory `/tmp/coencoder/config/config.json`");
+        config_file_path_ = "/tmp/coencoder/config/config.json";
+      } else {
+        config_file_path_ = std::string(home) + "/.config/coencoder/config.json";
+      }
     } else {
-      config_file_path_ = std::string(home) + "/.config/coencoder/config.json";
+      config_file_path_ = config_path;
     }
     create_directory(config_file_path_);
     if (config_.load_config(config_file_path_)) {
@@ -170,6 +174,8 @@ private:
   {
     COLOG_DEBUG("removing topic [ %s ] from subscription list", topic.input_topic.c_str());
     publisher_map_.erase(topic.input_topic);
+
+    COLOG_DEBUG("destruct encoder of topic [ %s ]", topic.input_topic.c_str());
     encoder_map_.erase(topic.input_topic);
     subscribed_topics_params_.erase(topic);
 
@@ -197,21 +203,26 @@ private:
           topic.input_topic, qos,
           [this, topic](Image::SharedPtr msg) {
             if (encoding_enabled_) {
-              if (publisher_map_.count(topic.input_topic) == 0) {
-                COLOG_DEBUG("create publisher [%s]", topic.output_topic.c_str());
-                const auto pub = this->create_publisher<CompressedVideo>(topic.output_topic, 10);
-                publisher_map_.emplace(topic.input_topic, pub);
+              if (encoder_map_.count(topic.input_topic) == 0) {
+                COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
                 encoder_map_.emplace(
                   std::piecewise_construct,
                   std::forward_as_tuple(topic.input_topic),
-                  std::forward_as_tuple(msg->width, msg->height, topic.bitrate, topic.input_topic));
+                  std::forward_as_tuple(msg->width, msg->height, topic.bitrate));
               }
-              process_image(convertToCvMat(*msg), topic.input_topic);
+              process_image(
+                convertToCvMat(*msg), topic.input_topic,
+                static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nanosec));
             }
           });
         subscribed_topics_params_.emplace(topic);
         image_sub_.emplace(topic.input_topic, img_sub);
         COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
+        if (publisher_map_.count(topic.input_topic) == 0) {
+          COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
+          const auto pub = this->create_publisher<CompressedVideo>(topic.output_topic, 10);
+          publisher_map_.emplace(topic.input_topic, pub);
+        }
       } else if (msg_type == "sensor_msgs/msg/CompressedImage") {
         COLOG_DEBUG("msg_type: sensor_msgs/msg/CompressedImage");
         const auto qos = get_publisher_qos(topic.input_topic);
@@ -223,23 +234,26 @@ private:
               if (decoded_img.empty()) {
                 return;
               }
-              if (publisher_map_.count(topic.input_topic) == 0) {
-                COLOG_DEBUG("create publisher [%s]", topic.output_topic.c_str());
-                const auto pub = this->create_publisher<CompressedVideo>(topic.output_topic, 10);
-                publisher_map_.emplace(topic.input_topic, pub);
+              if (encoder_map_.count(topic.input_topic) == 0) {
+                COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
                 encoder_map_.emplace(
                   std::piecewise_construct,
                   std::forward_as_tuple(topic.input_topic),
-                  std::forward_as_tuple(
-                    decoded_img.cols, decoded_img.rows, topic.bitrate,
-                    topic.input_topic));
+                  std::forward_as_tuple(decoded_img.cols, decoded_img.rows, topic.bitrate));
               }
-              process_image(decoded_img, topic.input_topic);
+              process_image(
+                decoded_img, topic.input_topic,
+                static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nanosec));
             }
           });
         subscribed_topics_params_.emplace(topic);
         comp_image_sub_.emplace(topic.input_topic, comp_sub);
         COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
+        if (publisher_map_.count(topic.input_topic) == 0) {
+          COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
+          const auto pub = this->create_publisher<CompressedVideo>(topic.output_topic, 10);
+          publisher_map_.emplace(topic.input_topic, pub);
+        }
       } else {
         COLOG_ERROR("unsupported topic type: %s", topic.input_topic.c_str());
       }
@@ -248,23 +262,23 @@ private:
     }
   }
 
-  void process_image(cv::Mat img, const std::string & topic)
+  void process_image(const cv::Mat & img, const std::string & topic, const int64_t & timestamp)
   {
     if (img.empty()) {
       return;
     }
 
-    auto encoder_it = encoder_map_.find(topic);
+    const auto encoder_it = encoder_map_.find(topic);
     if (encoder_it == encoder_map_.end()) {
       COLOG_WARN("Encoder not found for topic: %s", topic.c_str());
       return;
     }
 
     try {
-      encoder_it->second.send_frame(img);
+      encoder_it->second.send_frame(img, timestamp);
       const auto frame = encoder_it->second.encode_frame();
       if (frame) {
-        auto pub_it = publisher_map_.find(topic);
+        const auto pub_it = publisher_map_.find(topic);
         if (pub_it != publisher_map_.end()) {
           pub_it->second->publish(*frame);
         }
@@ -370,6 +384,7 @@ private:
 
     COLOG_DEBUG(
       "  use QoS[depth=%zu, reliability=%s, durability=%s] to subscribe topic: %s",
+      depth,
       (qos.get_rmw_qos_profile().reliability == RMW_QOS_POLICY_RELIABILITY_RELIABLE) ?
       "RELIABLE" : "BEST_EFFORT",
       (qos.get_rmw_qos_profile().durability == RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL) ?

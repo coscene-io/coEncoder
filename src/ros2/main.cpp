@@ -13,15 +13,24 @@
 // limitations under the License.
 
 #include <memory>
+#include <string>
 #include "ros2/coencoder.hpp"
 #include "rclcpp/executors/multi_threaded_executor.hpp"
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
+  std::string config_file;
+  for (int i = 1; i < argc; i++) {
+    if (std::string(argv[i]) == "--config-file" && i + 1 < argc) {
+      config_file = argv[i + 1];
+      break;
+    }
+  }
+  RCLCPP_INFO(rclcpp::get_logger("MAIN"), "config_path: %s", config_file.c_str());
 
   try {
-    auto node = std::make_shared<CoEncoder>();
+    auto node = std::make_shared<CoEncoder>(config_file);
     RCLCPP_INFO(rclcpp::get_logger("MAIN"), "CoEncoder MultiThreadedExecutor SPIN!");
 
     rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);

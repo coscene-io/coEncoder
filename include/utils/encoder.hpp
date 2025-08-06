@@ -40,9 +40,7 @@ using CompressedVideoPtr = std::shared_ptr<CompressedVideo>;
 
 extern "C" {
 #include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
-#include <libswscale/swscale.h>
 }
 
 class H264Encoder
@@ -50,20 +48,17 @@ class H264Encoder
 public:
   H264Encoder()
   {
-    H264Encoder(640, 480, 1600000, "");
+    H264Encoder(640, 480, 1600000);
   }
 
   H264Encoder(
-    const int width, const int height, const int bitrate = 1600000,
-    const std::string & topic = "")
+    const int width, const int height, const int bitrate = 1600000)
   {
 #ifdef ROS_VERSION_1
     avcodec_register_all();
 #endif
 
     bitrate_ = bitrate;
-    encoder_topic_ = topic;
-
     const char * encoder_names[] = {
       // "h264_nvenc",    // NVIDIA NVENC
       // "h264_qsv",      // Intel Quick Sync
@@ -78,7 +73,7 @@ public:
     for (const char * encoder_name : encoder_names) {
       codec_ = avcodec_find_encoder_by_name(encoder_name);
       if (codec_) {
-        COLOG_INFO("create encoder with [%s] for topic [%s]", encoder_name, topic.c_str());
+        COLOG_INFO("create encoder with [%s]", encoder_name);
         selected_encoder = encoder_name;
         encoder_name_ = encoder_name;
         break;
@@ -102,9 +97,8 @@ public:
     codec_context_->bit_rate = bitrate_;
     codec_context_->rc_max_rate = bitrate_;
     codec_context_->rc_min_rate = bitrate_;
-    codec_context_->rc_buffer_size = bitrate_;
 
-    codec_context_->time_base = (AVRational) {1, 30};
+    codec_context_->time_base = (AVRational) {1, 1000};
     codec_context_->framerate = (AVRational) {30, 1};
     codec_context_->gop_size = 30;
     codec_context_->max_b_frames = 0;
@@ -175,9 +169,6 @@ public:
       frame_->data, frame_->linesize, codec_context_->width,
       codec_context_->height, codec_context_->pix_fmt, 32);
 
-    start_time_ = std::chrono::high_resolution_clock::time_point();
-    initialized_ = false;
-
     COLOG_INFO(
       "H264 encoder initialized with bitrate: %d bps (%.2f Mbps)",
       bitrate_, bitrate_ / 1000000.0);
@@ -185,7 +176,6 @@ public:
 
   ~H264Encoder()
   {
-    COLOG_INFO("destructor for topic [%s]", encoder_topic_.c_str());
     if (frame_) {
       av_freep(&frame_->data[0]);
       av_frame_free(&frame_);
@@ -195,16 +185,10 @@ public:
     }
   }
 
-  void send_frame(const cv::Mat & img)
+  void send_frame(const cv::Mat & img, const int64_t & timestamp)
   {
     received_ = true;
     std::lock_guard<std::mutex> lock(mutex_);
-
-    if (!initialized_) {
-      start_time_ = std::chrono::high_resolution_clock::now();
-      initialized_ = true;
-    }
-
     cv::Mat yuv_img;
 
     if (img.channels() == 1) {
@@ -223,8 +207,8 @@ public:
     }
 
     if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
-      int y_size = codec_context_->width * codec_context_->height;
-      int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
+      const int y_size = codec_context_->width * codec_context_->height;
+      const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 
       memcpy(frame_->data[0], yuv_img.data, y_size);
 
@@ -244,31 +228,27 @@ public:
       memcpy(frame_->data[1], yuv_img.data + y_size, uv_size);
       memcpy(frame_->data[2], yuv_img.data + y_size + uv_size, uv_size);
     }
+
+    frame_->pts = timestamp;
+    const int ret = avcodec_send_frame(codec_context_, frame_);
+    if (ret < 0) {
+      char err_buf[128];
+      av_strerror(ret, err_buf, sizeof(err_buf));
+      COLOG_WARN("send frame to encoder failed: %s", err_buf);
+    }
   }
 
   CompressedVideoPtr encode_frame()
   {
-    if (!received_ || !initialized_) {
+    if (!received_) {
       return nullptr;
     }
-    AVPacket pkt = {0};
+    AVPacket pkt = {nullptr};
     av_new_packet(&pkt, 0);
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    auto current_time = std::chrono::high_resolution_clock::now();
-    auto elapsed_time = current_time - start_time_;
-    auto elapsed_milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_time);
-
-    // 1ms = 1000 ticks per second, so use milliseconds directly
-    frame_->pts = elapsed_milliseconds.count();
-
-    int ret = avcodec_send_frame(codec_context_, frame_);
-    if (ret < 0) {
-      return nullptr;
-    }
-
-    ret = avcodec_receive_packet(codec_context_, &pkt);
+    const auto ret = avcodec_receive_packet(codec_context_, &pkt);
     if (ret == 0) {
       auto video_msg = CompressedVideo();
       video_msg.frame_id = "camera_frame";
@@ -276,10 +256,9 @@ public:
       video_msg.format = "h264";
 
 #ifdef ROS_VERSION_1
-      video_msg.timestamp = ros::Time::now();
+      video_msg.timestamp = ros::Time(pkt.pts / 1e9);
 #else
-      rclcpp::Clock clock(RCL_SYSTEM_TIME);
-      video_msg.timestamp = clock.now();
+      video_msg.timestamp = rclcpp::Time(pkt.pts);
 #endif
 
       av_packet_unref(&pkt);
@@ -293,14 +272,9 @@ private:
   AVFrame * frame_ = nullptr;
   AVCodecContext * codec_context_ = nullptr;
   std::string encoder_name_;
-  std::string encoder_topic_;
   int bitrate_;
 
   std::mutex mutex_;
-
-  std::chrono::high_resolution_clock::time_point start_time_;
-  bool initialized_ = false;
-
   std::atomic<bool> received_{false};
 };
 

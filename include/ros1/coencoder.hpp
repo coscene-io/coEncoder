@@ -42,27 +42,24 @@
 #include "utils/logger.hpp"
 #include "utils/config.hpp"
 
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/imgutils.h>
-#include <libswscale/swscale.h>
-}
-
 class CoEncoder
 {
 public:
-  CoEncoder()
+  explicit CoEncoder(const std::string & config_file)
   : nh_("~")
   {
     const char * home = std::getenv("HOME");
-    if (!home) {
-      ROS_WARN(
-        "Failed to get HOME environment variable, "
-        "use default config directory `/tmp/coencoder/config/config.json`");
-      config_file_path_ = "/tmp/coencoder/config/config.json";
+    if (config_file.empty()) {
+      if (!home) {
+        ROS_WARN(
+          "Failed to get HOME environment variable, "
+          "use default config directory `/tmp/coencoder/config/config.json`");
+        config_file_path_ = "/tmp/coencoder/config/config.json";
+      } else {
+        config_file_path_ = std::string(home) + "/.config/coencoder/config.json";
+      }
     } else {
-      config_file_path_ = std::string(home) + "/.config/coencoder/config.json";
+      config_file_path_ = config_file;
     }
     create_directory(config_file_path_);
     if (config_.load_config(config_file_path_)) {
@@ -158,40 +155,52 @@ private:
         topic.input_topic, 1,
         [this, topic](const sensor_msgs::Image::ConstPtr & msg) {
           if (encoding_enabled_) {
-            if (publisher_map_.count(topic.input_topic) == 0) {
-              ros::Publisher pub = nh_.advertise<CompressedVideo>(topic.output_topic, 1);
-              publisher_map_.emplace(topic.input_topic, pub);
+            if (encoder_map_.count(topic.input_topic) == 0) {
+              COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
               encoder_map_.emplace(
                 std::piecewise_construct,
                 std::forward_as_tuple(topic.input_topic),
-                std::forward_as_tuple(msg->width, msg->height, topic.bitrate, topic.input_topic));
+                std::forward_as_tuple(msg->width, msg->height, topic.bitrate));
             }
-            process_image(convertToCvMat(*msg), topic.input_topic);
+            process_image(
+              convertToCvMat(*msg), topic.input_topic,
+              static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nsec));
           }
         });
       subscriber_map_.emplace(topic.input_topic, sub);
       subscribed_topics_params_.emplace(topic);
+      COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
+      if (publisher_map_.count(topic.input_topic) == 0) {
+        COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
+        ros::Publisher pub = nh_.advertise<CompressedVideo>(topic.output_topic, 1);
+        publisher_map_.emplace(topic.input_topic, pub);
+      }
     } else if (topic_type == "sensor_msgs/CompressedImage") {
       ros::Subscriber sub = nh_.subscribe<sensor_msgs::CompressedImage>(
         topic.input_topic, 1,
         [this, topic](const sensor_msgs::CompressedImage::ConstPtr & msg) {
           if (encoding_enabled_) {
             const cv::Mat decoded_img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_UNCHANGED);
-            if (publisher_map_.count(topic.input_topic) == 0) {
-              ros::Publisher pub = nh_.advertise<CompressedVideo>(topic.output_topic, 1);
-              publisher_map_.emplace(topic.input_topic, pub);
+            if (encoder_map_.count(topic.input_topic) == 0) {
+              COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
               encoder_map_.emplace(
                 std::piecewise_construct,
                 std::forward_as_tuple(topic.input_topic),
-                std::forward_as_tuple(
-                  decoded_img.cols, decoded_img.rows, topic.bitrate,
-                  topic.input_topic));
+                std::forward_as_tuple(decoded_img.cols, decoded_img.rows, topic.bitrate));
             }
-            process_image(decoded_img, topic.input_topic);
+            process_image(
+              decoded_img, topic.input_topic,
+              static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nsec));
           }
         });
       subscriber_map_.emplace(topic.input_topic, sub);
       subscribed_topics_params_.emplace(topic);
+      COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
+      if (publisher_map_.count(topic.input_topic) == 0) {
+        COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
+        ros::Publisher pub = nh_.advertise<CompressedVideo>(topic.output_topic, 1);
+        publisher_map_.emplace(topic.input_topic, pub);
+      }
     } else {
       ROS_WARN(
         "Unsupported message type [%s] for topic '%s'", topic_type.c_str(),
@@ -203,6 +212,8 @@ private:
   {
     COLOG_DEBUG("removing topic [ %s ] from subscription list", topic.input_topic.c_str());
     publisher_map_.erase(topic.input_topic);
+
+    COLOG_DEBUG("destruct encoder of topic [ %s ]", topic.input_topic.c_str());
     encoder_map_.erase(topic.input_topic);
     subscriber_map_.erase(topic.input_topic);
 
@@ -230,7 +241,7 @@ private:
     return image;
   }
 
-  void process_image(cv::Mat img, const std::string & topic)
+  void process_image(const cv::Mat & img, const std::string & topic, const int64_t & timestamp)
   {
     if (img.empty()) {
       ROS_WARN("Empty image received");
@@ -242,7 +253,7 @@ private:
       return;
     }
     try {
-      encoder_it->second.send_frame(img);
+      encoder_it->second.send_frame(img, timestamp);
       const auto frame = encoder_it->second.encode_frame();
       if (frame) {
         auto pub_it = publisher_map_.find(topic);

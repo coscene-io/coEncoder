@@ -11,15 +11,24 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include <ros1/coencoder.hpp>
 
+#include <string>
+#include <ros1/coencoder.hpp>
 
 int main(int argc, char ** argv)
 {
   ros::init(argc, argv, "coencoder");
+  std::string config_file;
+  for (int i = 1; i < argc; i++) {
+    if (std::string(argv[i]) == "--config-file" && i + 1 < argc) {
+      config_file = argv[i + 1];
+      break;
+    }
+  }
+  ROS_INFO("config_path: %s", config_file.c_str());
 
   try {
-    CoEncoder node;
+    CoEncoder node(config_file);
     ros::AsyncSpinner spinner(4);
     spinner.start();
     ros::waitForShutdown();
