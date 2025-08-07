@@ -51,7 +51,7 @@ public:
     const char * home = std::getenv("HOME");
     if (config_file.empty()) {
       if (!home) {
-        ROS_WARN(
+        COLOG_WARN(
           "Failed to get HOME environment variable, "
           "use default config directory `/tmp/coencoder/config/config.json`");
         config_file_path_ = "/tmp/coencoder/config/config.json";
@@ -62,9 +62,8 @@ public:
       config_file_path_ = config_file;
     }
     create_directory(config_file_path_);
-    if (config_.load_config(config_file_path_)) {
-      update_logger(config_.log_directory_, config_.log_level_);
-    }
+    config_.load_config(config_file_path_);
+    update_logger(config_.log_directory_, config_.log_level_);
 
     COLOG_INFO("============================== coEncoder started ==============================");
     COLOG_INFO("config: \n%s", config_.print_config().c_str());
@@ -77,15 +76,15 @@ public:
 
     encoder_ctrl_ = nh_.advertiseService<std_srvs::SetBool::Request, std_srvs::SetBool::Response>(
       "encoder_ctrl", [this](std_srvs::SetBool::Request & req, std_srvs::SetBool::Response & res) {
-        ROS_INFO("encoder_ctrl was called");
+        COLOG_INFO("encoder_ctrl was called");
         encoding_enabled_ = req.data;
         res.success = true;
         if (encoding_enabled_) {
           res.message = "encoder enabled";
-          ROS_INFO("encoder enabled");
+          COLOG_INFO("encoder enabled");
         } else {
           res.message = "encoder disabled";
-          ROS_INFO("encoder disabled");
+          COLOG_INFO("encoder disabled");
         }
         return true;
       });
@@ -129,24 +128,22 @@ private:
         const nlohmann::json encoder_config = response_json["plugin_config"]["coEncoder"];
 
         if (config_.update_config(encoder_config)) {
-          COLOG_DEBUG("new config arrived, update with:\n%s ", encoder_config.dump(2).c_str());
+          COLOG_INFO("new config arrived, update with:\n%s ", encoder_config.dump(2).c_str());
           update_logger(config_.log_directory_, config_.log_level_);
-          if (!config_.save_config(config_file_path_)) {
-            COLOG_WARN("save config failed!");
-          }
+          update(config_);
+          config_.save_config(config_file_path_);
         }
       } catch (const nlohmann::json::parse_error & e) {
-        ROS_ERROR("Failed to parse JSON response: %s", e.what());
+        COLOG_ERROR("Failed to parse JSON response: %s", e.what());
       }
     } else {
-      ROS_ERROR("GET request failed: %s", resp.error_message.c_str());
+      COLOG_ERROR("GET request failed: %s", resp.error_message.c_str());
     }
-    update(config_);
   }
 
   void subscribe_topic(const TopicParam & topic)
   {
-    ROS_INFO(
+    COLOG_INFO(
       "Subscribing to topic: %s, publish topic: %s", topic.input_topic.c_str(),
       topic.output_topic.c_str());
     const std::string topic_type = get_topic_type(topic.input_topic);
@@ -160,7 +157,8 @@ private:
               encoder_map_.emplace(
                 std::piecewise_construct,
                 std::forward_as_tuple(topic.input_topic),
-                std::forward_as_tuple(msg->width, msg->height, topic.bitrate));
+                std::forward_as_tuple(
+                  msg->width, msg->height, topic.bitrate, topic.encoder_name));
             }
             process_image(
               convertToCvMat(*msg), topic.input_topic,
@@ -186,7 +184,8 @@ private:
               encoder_map_.emplace(
                 std::piecewise_construct,
                 std::forward_as_tuple(topic.input_topic),
-                std::forward_as_tuple(decoded_img.cols, decoded_img.rows, topic.bitrate));
+                std::forward_as_tuple(
+                  decoded_img.cols, decoded_img.rows, topic.bitrate, topic.encoder_name));
             }
             process_image(
               decoded_img, topic.input_topic,
@@ -202,7 +201,7 @@ private:
         publisher_map_.emplace(topic.input_topic, pub);
       }
     } else {
-      ROS_WARN(
+      COLOG_INFO(
         "Unsupported message type [%s] for topic '%s'", topic_type.c_str(),
         topic.input_topic.c_str());
     }
@@ -244,7 +243,7 @@ private:
   void process_image(const cv::Mat & img, const std::string & topic, const int64_t & timestamp)
   {
     if (img.empty()) {
-      ROS_WARN("Empty image received");
+      COLOG_WARN("Empty image received");
       return;
     }
     auto encoder_it = encoder_map_.find(topic);
@@ -284,15 +283,9 @@ private:
   Config config_;
 
   std::string config_file_path_ = "/tmp/coencoder/config";
-  // std::string log_directory_ = "/tmp/coencoder/log/";
-  // std::string log_level_ = "Info";
 
   std::atomic<bool> encoding_enabled_{true};
 
-  // std::vector<std::string> input_topics_;
-  // std::vector<std::string> output_topics_;
-
-  // std::set<std::string> subscribed_topics_;
   std::set<TopicParam> subscribed_topics_params_;
 
   std::map<std::string, ros::Subscriber> subscriber_map_;

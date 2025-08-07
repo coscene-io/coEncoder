@@ -46,44 +46,22 @@ extern "C" {
 class H264Encoder
 {
 public:
-  H264Encoder()
-  {
-    H264Encoder(640, 480, 1600000);
-  }
-
   H264Encoder(
-    const int width, const int height, const int bitrate = 1600000)
+    const int width, const int height,
+    const int bitrate = 1600000, const std::string & encoder_name = "libx264")
   {
 #ifdef ROS_VERSION_1
     avcodec_register_all();
 #endif
 
     bitrate_ = bitrate;
-    const char * encoder_names[] = {
-      // "h264_nvenc",    // NVIDIA NVENC
-      // "h264_qsv",      // Intel Quick Sync
-      // "h264_amf",      // AMD VCE
-      // "h264_vaapi",    // VAAPI (Linux hardware acceleration)
-      "libx264"        // Software fallback
-    };
-
-    codec_ = nullptr;
-    const char * selected_encoder = nullptr;
-
-    for (const char * encoder_name : encoder_names) {
-      codec_ = avcodec_find_encoder_by_name(encoder_name);
-      if (codec_) {
-        COLOG_INFO("create encoder with [%s]", encoder_name);
-        selected_encoder = encoder_name;
-        encoder_name_ = encoder_name;
-        break;
-      }
-    }
-
+    encoder_name_ = encoder_name;
+    codec_ = avcodec_find_encoder_by_name(encoder_name_.c_str());
     if (!codec_) {
-      COLOG_INFO("No H.264 encoder found");
-      throw std::runtime_error("No H.264 encoder found");
+      COLOG_INFO("create encoder with [%s] failed, not found", encoder_name.c_str());
+      throw std::runtime_error("encoder not found");
     }
+    COLOG_INFO("create encoder with [%s]", encoder_name.c_str());
 
     codec_context_ = avcodec_alloc_context3(codec_);
     if (!codec_context_) {
@@ -103,11 +81,11 @@ public:
     codec_context_->gop_size = 30;
     codec_context_->max_b_frames = 0;
 
-    if (strcmp(selected_encoder, "h264_nvenc") == 0) {
+    if (encoder_name_ == "h264_nvenc") {
       codec_context_->pix_fmt = AV_PIX_FMT_NV12;
-    } else if (strcmp(selected_encoder, "h264_qsv") == 0) {
+    } else if (encoder_name_ == "h264_qsv") {
       codec_context_->pix_fmt = AV_PIX_FMT_NV12;
-    } else if (strcmp(selected_encoder, "h264_vaapi") == 0) {
+    } else if (encoder_name_ == "h264_vaapi") {
       codec_context_->pix_fmt = AV_PIX_FMT_VAAPI;
     } else {
       codec_context_->pix_fmt = AV_PIX_FMT_YUV420P;
@@ -115,22 +93,22 @@ public:
 
     AVDictionary * codecOpts = nullptr;
 
-    if (strcmp(selected_encoder, "h264_nvenc") == 0) {
+    if (encoder_name_ == "h264_nvenc") {
       av_dict_set(&codecOpts, "preset", "llhq", 0);  // Low latency high quality
       av_dict_set(&codecOpts, "tune", "ll", 0);      // Low latency
       av_dict_set(&codecOpts, "rc", "cbr", 0);       // Constant bitrate
       av_dict_set(&codecOpts, "profile", "baseline", 0);
-    } else if (strcmp(selected_encoder, "h264_qsv") == 0) {
+    } else if (encoder_name_ == "h264_qsv") {
       av_dict_set(&codecOpts, "preset", "veryfast", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
       av_dict_set(&codecOpts, "async_depth", "1", 0);
       av_dict_set(&codecOpts, "look_ahead", "0", 0);
       av_dict_set(&codecOpts, "ratecontrol", "cbr", 0);
-    } else if (strcmp(selected_encoder, "h264_amf") == 0) {
+    } else if (encoder_name_ == "h264_amf") {
       av_dict_set(&codecOpts, "quality", "speed", 0);
       av_dict_set(&codecOpts, "rc", "cbr", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
-    } else if (strcmp(selected_encoder, "h264_vaapi") == 0) {
+    } else if (encoder_name_ == "h264_vaapi") {
       av_dict_set(&codecOpts, "profile", "baseline", 0);
       av_dict_set(&codecOpts, "rc_mode", "CBR", 0);
     } else {

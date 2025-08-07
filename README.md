@@ -5,17 +5,16 @@
 - Have ROS on your system
 
 - Install dependencies
-    ```bash
-    sudo apt install libavformat-dev libswscale-dev libopencv-dev ros-{ros_distro}-foxglove-msgs -y
-    ```
+```bash
+sudo apt install libavcodec-dev libavutil-dev libopencv-dev libcurl4 ros-{ros_distro}-foxglove-msgs -y
+```
 ## GPU Supported
-coencoder currently supports encoding using GPUs. coencoder selects encoders in the following order:
+coencoder currently supports encoding using GPUs, currently supports the following encoders:
 ```C++
 "h264_nvenc",    // NVIDIA NVENC
 "h264_qsv",      // Intel Quick Sync
 "h264_amf",      // AMD VCE
 "h264_vaapi",    // VAAPI (Linux hardware acceleration)
-"libx264"        // Software fallback
 ```
 
 ## Configuration
@@ -30,11 +29,13 @@ If the system environment variable contains `HOME`, the config file is located a
   "topics_param": [
     {
       "bitrate": 1600000,
+      "encoder_name": "h264_nvenc",
       "input": "/camera_0/raw_image",
       "output": "/camera_0/raw_image/h264"
     },
     {
       "bitrate": 1600000,
+      "encoder_name": "libx264",
       "input": "/camera_1/raw_image",
       "output": "/camera_1/raw_image/h264"
     }
@@ -46,6 +47,7 @@ If the system environment variable contains `HOME`, the config file is located a
 * **log_level**: Log level, possible values: Debug / Info / Warn / Error
 * **topics_param**: Array type, contains 3 fields
   * **bitrate**: Output bitrate
+  * **encoder_name**: encoder name, `h264_nvenc`, `h264_qsv`, `h264_amf`, `h264_vaapi` was supported, and also, you can use `libx264` to encode frames by CPU
   * **input**: Input topic name
   * **output**: Output topic name
 

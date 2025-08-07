@@ -21,10 +21,10 @@
   <depend>image_transport</depend>
   <depend>OpenCV</depend>
 
-  <exec_depend>libavformat-dev</exec_depend>
+  <!-- <exec_depend>libavformat-dev</exec_depend> -->
   <exec_depend>libavcodec-dev</exec_depend>
   <exec_depend>libavutil-dev</exec_depend>
-  <exec_depend>libswscale-dev</exec_depend>
+  <!-- <exec_depend>libswscale-dev</exec_depend> -->
 
   <export>
     <build_type condition="$ROS_VERSION == 1">catkin</build_type>

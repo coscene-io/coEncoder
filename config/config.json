@@ -1,0 +1,19 @@
+{
+  "enable_by_default": true,
+  "log_directory": "/home/cos/logs",
+  "log_level": "Debug",
+  "topics_param": [
+    {
+      "encoder_name": "h264_nvenc",
+      "bitrate": 1600000,
+      "input": "/camera_0/raw_image",
+      "output": "/camera_0/raw_image/h264"
+    },
+    {
+      "encoder_name": "h264_nvenc",
+      "bitrate": 1600000,
+      "input": "/camera_1/raw_image",
+      "output": "/camera_1/raw_image/h264"
+    }
+  ]
+}

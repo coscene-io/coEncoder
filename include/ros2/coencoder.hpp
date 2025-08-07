@@ -72,9 +72,8 @@ public:
       config_file_path_ = config_path;
     }
     create_directory(config_file_path_);
-    if (config_.load_config(config_file_path_)) {
-      update_logger(config_.log_directory_, config_.log_level_);
-    }
+    config_.load_config(config_file_path_);
+    update_logger(config_.log_directory_, config_.log_level_);
 
     COLOG_INFO("============================== coEncoder started ==============================");
     COLOG_INFO("config: \n%s", config_.print_config().c_str());
@@ -136,9 +135,8 @@ private:
         if (config_.update_config(encoder_config)) {
           COLOG_INFO("new config arrived, update with:\n%s ", encoder_config.dump(2).c_str());
           update_logger(config_.log_directory_, config_.log_level_);
-          if (!config_.save_config(config_file_path_)) {
-            COLOG_WARN("save config failed!");
-          }
+          update(config_);
+          config_.save_config(config_file_path_);
         }
       } catch (const nlohmann::json::parse_error & e) {
         COLOG_ERROR("Failed to parse JSON response: %s", e.what());
@@ -146,7 +144,6 @@ private:
     } else {
       COLOG_ERROR("GET request failed: %s", resp.error_message.c_str());
     }
-    update(config_);
   }
 
   void update_logger(const std::string & log_dir, const std::string & log_lvl)

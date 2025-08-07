@@ -31,20 +31,24 @@ struct TopicParam
   int64_t bitrate;
   std::string input_topic;
   std::string output_topic;
+  std::string encoder_name;
 
   TopicParam(
-    const int64_t bitrate, const std::string & input_topic, const std::string & output_topic)
+    const int64_t bitrate, const std::string & input_topic,
+    const std::string & output_topic, const std::string & encoder_name)
   {
     this->bitrate = bitrate;
     this->input_topic = input_topic;
     this->output_topic = output_topic;
+    this->encoder_name = encoder_name;
   }
 
   bool operator==(const TopicParam & other) const
   {
     return bitrate == other.bitrate &&
            input_topic == other.input_topic &&
-           output_topic == other.output_topic;
+           output_topic == other.output_topic &&
+           encoder_name == other.encoder_name;
   }
 
   bool operator<(const TopicParam & other) const
@@ -55,7 +59,10 @@ struct TopicParam
     if (input_topic != other.input_topic) {
       return input_topic < other.input_topic;
     }
-    return output_topic < other.output_topic;
+    if (output_topic != other.output_topic) {
+      return output_topic < other.output_topic;
+    }
+    return encoder_name < other.encoder_name;
   }
 };
 
@@ -65,6 +72,7 @@ public:
   Config()
   {
     current_config_["enable_by_default"] = true;
+    current_config_["encoder_name"] = "libx264";
     current_config_["log_directory"] = "/tmp/coencoder/log/";
     current_config_["log_level"] = "Debug";
     current_config_["topics_param"] = nlohmann::json::array();
@@ -72,31 +80,29 @@ public:
 
   ~Config() = default;
 
-  bool load_config(const std::string & config_file)
+  void load_config(const std::string & config_file)
   {
     if (access(config_file.c_str(), F_OK) == -1) {
       save_config(config_file);
       COLOG_WARN("Config file does not exist");
-      return false;
+      return;
     }
     try {
       std::ifstream config(config_file);
       if (!config.is_open()) {
         COLOG_WARN("Failed to open config file");
-        return false;
+        return;
       }
 
       nlohmann::json config_json;
       config >> config_json;
       config.close();
 
-      return update_config(config_json);
+      update_config(config_json);
     } catch (const nlohmann::json::parse_error & e) {
       COLOG_ERROR("Failed to parse config file %s: %s", config_file.c_str(), e.what());
-      return false;
     } catch (const std::exception & e) {
       COLOG_ERROR("Failed to load config file %s: %s", config_file.c_str(), e.what());
-      return false;
     }
   }
 
@@ -114,18 +120,17 @@ public:
     return true;
   }
 
-  bool save_config(const std::string & path) const
+  void save_config(const std::string & path) const
   {
     std::ofstream config_file(path);
     if (!config_file.is_open()) {
       COLOG_WARN("failed to open config file while saving config");
-      return false;
+      return;
     }
 
     config_file << current_config_.dump(2);
     config_file.close();
     COLOG_INFO("successfully saved config to file [%s]", path.c_str());
-    return true;
   }
 
   std::string print_config() const
@@ -161,18 +166,27 @@ private:
 
   void parse_config()
   {
-    enable_by_default_ = current_config_["enable_by_default"].get<bool>();
-    log_directory_ = current_config_["log_directory"].get<std::string>();
-    log_level_ = current_config_["log_level"].get<std::string>();
+    if (current_config_.contains("enable_by_default")) {
+      enable_by_default_ = current_config_["enable_by_default"].get<bool>();
+    }
+    if (current_config_.contains("log_directory")) {
+      log_directory_ = current_config_["log_directory"].get<std::string>();
+    }
+    if (current_config_.contains("log_level")) {
+      log_level_ = current_config_["log_level"].get<std::string>();
+    }
 
     topics_param.clear();
     for (const auto & param : current_config_["topics_param"]) {
+      const std::string encoder_name = param.contains("encoder_name") ?
+        param["encoder_name"].get<std::string>() : "libx264";
       topics_param.emplace(
         std::move(
           TopicParam(
             param["bitrate"].get<int64_t>(),
             param["input"].get<std::string>(),
-            param["output"].get<std::string>()
+            param["output"].get<std::string>(),
+            encoder_name
           )
         )
       );
