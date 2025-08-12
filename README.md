@@ -19,7 +19,7 @@ coencoder currently supports encoding using GPUs, currently supports the followi
 
 ## Configuration
 
-If the system environment variable contains `HOME`, the config file is located at `$HOME/.config/coencoder/config.json`, otherwise, the config file is located at `/tmp/coencoder/config/config.json`
+If the system environment variable contains `HOME`, the config file is located at `$HOME/.config/coencoder/config.json`, otherwise, the config file is located at `/tmp/coencoder/config/config.json`. If you start coEncoder using `rosrun` (or `ros2 run`), you can use --config-file to specify the config file path.
 
 ```Json
 {
@@ -47,7 +47,7 @@ If the system environment variable contains `HOME`, the config file is located a
 * **log_level**: Log level, possible values: Debug / Info / Warn / Error
 * **topics_param**: Array type, contains 3 fields
   * **bitrate**: Output bitrate
-  * **encoder_name**: encoder name, `h264_nvenc`, `h264_qsv`, `h264_amf`, `h264_vaapi` was supported, and also, you can use `libx264` to encode frames by CPU
+  * **encoder_name**: Encoder name, supports `h264_nvenc`, `h264_qsv`, `h264_amf`, `h264_vaapi`, and you can also use `libx264` to encode frames by CPU. If this field is missing in the configuration, `libx264` will be used for encoding
   * **input**: Input topic name
   * **output**: Output topic name
 
@@ -107,6 +107,8 @@ If the system environment variable contains `HOME`, the config file is located a
   source /opt/ros/{ros destro}/setup.bash
   
   roslaunch coencoder coencoder.launch
+  # You can also use `rosrun` to start the node
+  rosrun coencoder coencoder --config-file {your_config_file_path}
   ```
   
 - ROS2
@@ -117,4 +119,6 @@ If the system environment variable contains `HOME`, the config file is located a
   source /opt/ros/{ros destro}/setup.bash
   
   ros2 launch coencoder coencoder_launch.xml
+  # You can also use `ros2 run` to start the node  
+  ros2 run coencoder coencoder -- --config-file {your_config_file_path}
   ```

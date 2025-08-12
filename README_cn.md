@@ -19,7 +19,7 @@ coencoder目前支持使用GPU进行编码，目前支持以下编码器：
 
 ## 配置
 
-如果系统环境变量包含`HOME`，配置文件位于`$HOME/.config/coencoder/config.json`，否则配置文件位于`/tmp/coencoder/config/config.json`
+如果系统环境变量包含`HOME`，配置文件位于`$HOME/.config/coencoder/config.json`，否则配置文件位于`/tmp/coencoder/config/config.json`. 如果使用 `rosrun` (or `ros2 run`) 启动coEncoder, 可使用 --config-file 指定配置文件路径
 
 ```Json
 {
@@ -47,7 +47,7 @@ coencoder目前支持使用GPU进行编码，目前支持以下编码器：
 * **log_level:** 日志级别，可选值：Debug / Info / Warn / Error
 * **topics_param:** 数组类型，包含3个字段
   * **bitrate:** 输出码率
-  * **encoder_name:** 编码器名称，支持`h264_nvenc`、`h264_qsv`、`h264_amf`、`h264_vaapi`，同时也可以使用`libx264`通过CPU编码帧
+  * **encoder_name:** 编码器名称，支持`h264_nvenc`、`h264_qsv`、`h264_amf`、`h264_vaapi`，同时也可以使用`libx264`通过CPU编码帧. 如果配置中缺失该字段,则使用 `libx264` 进行编码
   * **input:** 输入topic名称
   * **output:** 输出topic名称
 
@@ -107,6 +107,8 @@ coencoder目前支持使用GPU进行编码，目前支持以下编码器：
   source /opt/ros/{ros destro}/setup.bash
   
   roslaunch coencoder coencoder.launch
+  # 也可使用 `rosrun` 启动节点
+  rosrun coencoder coencoder --config-file {your_config_file_path}
   ```
   
 - ROS2
@@ -117,4 +119,6 @@ coencoder目前支持使用GPU进行编码，目前支持以下编码器：
   source /opt/ros/{ros destro}/setup.bash
   
   ros2 launch coencoder coencoder_launch.xml
+  # 也可使用 `rosrun` 启动节点  
+  ros2 run coencoder coencoder -- --config-file {your_config_file_path}
   ``` 
