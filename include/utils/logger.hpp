@@ -80,6 +80,9 @@ public:
 
   void set_log_dir(const std::string & dir)
   {
+    if (log_dir_ == dir) {
+      return;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     if (current_file_.is_open()) {
       current_file_.close();
@@ -93,6 +96,9 @@ public:
 
   void set_log_level(const std::string & level)
   {
+    if (current_level_string_ == level) {
+      return;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     if (level == "Debug") {
       current_level_ = LogLevel::DEBUG;
@@ -103,6 +109,7 @@ public:
     } else if (level == "Error") {
       current_level_ = LogLevel::ERROR;
     }
+    current_level_string_ = level;
   }
 
   void set_log_level(const LogLevel level)
@@ -117,6 +124,7 @@ private:
   std::ofstream current_file_;
   std::string current_date_;
   LogLevel current_level_;
+  std::string current_level_string_;
 
   void check_and_rotate_log()
   {

@@ -73,11 +73,11 @@ public:
     }
     create_directory(config_file_path_);
     config_.load_config(config_file_path_);
-    update_logger(config_.log_directory_, config_.log_level_);
+    Logger::getInstance().set_log_dir(config_.log_directory_);
+    Logger::getInstance().set_log_level(config_.log_level_);
 
     COLOG_INFO("============================== coEncoder started ==============================");
     COLOG_INFO("config: \n%s", config_.print_config().c_str());
-    update(config_);
 
     config_update_thread_ = std::thread(
       [this]() {
@@ -93,6 +93,23 @@ public:
           }
         }
       });
+
+    subscribe_update_thread_ = std::thread(
+    [this]() {
+      while (rclcpp::ok() && !shutdown_requested_) {
+        try {
+          std::lock_guard<std::mutex> lock(config_lock_);
+          update(config_);
+        } catch (const std::exception & e) {
+          COLOG_ERROR("Config update failed: %s", e.what());
+        }
+
+        for (int i = 0; i < 10 && !shutdown_requested_; ++i) {
+          std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+      }
+    });
+
 
     encoder_ctrl_ = this->create_service<std_srvs::srv::SetBool>(
       "/encoder_ctrl",
@@ -117,6 +134,9 @@ public:
     if (config_update_thread_.joinable()) {
       config_update_thread_.join();
     }
+    if (subscribe_update_thread_.joinable()) {
+      subscribe_update_thread_.join();
+    }
   }
 
 private:
@@ -132,11 +152,12 @@ private:
           return;
         }
         const nlohmann::json encoder_config = response_json["plugin_config"]["coEncoder"];
-        if (config_.update_config(encoder_config)) {
-          COLOG_INFO("new config arrived, update with:\n%s ", encoder_config.dump(2).c_str());
-          update_logger(config_.log_directory_, config_.log_level_);
-          update(config_);
-          config_.save_config(config_file_path_);
+        {
+          std::lock_guard<std::mutex> lock(config_lock_);
+          if (config_.update_config(encoder_config)) {
+            COLOG_INFO("new config arrived, update with:\n%s ", encoder_config.dump(2).c_str());
+            config_.save_config(config_file_path_);
+          }
         }
       } catch (const nlohmann::json::parse_error & e) {
         COLOG_ERROR("Failed to parse JSON response: %s", e.what());
@@ -146,15 +167,11 @@ private:
     }
   }
 
-  void update_logger(const std::string & log_dir, const std::string & log_lvl)
-  {
-    Logger::getInstance().set_log_dir(log_dir);
-    Logger::getInstance().set_log_level(log_lvl);
-  }
-
   void update(const Config & cfg)
   {
     encoding_enabled_ = cfg.enable_by_default_;
+    Logger::getInstance().set_log_dir(cfg.log_directory_);
+    Logger::getInstance().set_log_level(cfg.log_level_);
 
     const auto & diff = findSetsDifference(subscribed_topics_params_, cfg.topics_param);
     if (!diff.isIdentical()) {
@@ -195,7 +212,11 @@ private:
       const std::string msg_type = topic_names_and_types.find(topic.input_topic)->second[0];
       if (msg_type == "sensor_msgs/msg/Image") {
         COLOG_DEBUG("msg_type: sensor_msgs/msg/Image");
-        const auto qos = get_publisher_qos(topic.input_topic);
+        rclcpp::QoS qos{1};
+        if (!get_publisher_qos(topic.input_topic, qos)) {
+          COLOG_WARN("there is no publisher for topic: [ %s ], retry later", topic.input_topic.c_str());
+          return;
+        }
         auto img_sub = this->create_subscription<Image>(
           topic.input_topic, qos,
           [this, topic](Image::SharedPtr msg) {
@@ -205,7 +226,7 @@ private:
                 encoder_map_.emplace(
                   std::piecewise_construct,
                   std::forward_as_tuple(topic.input_topic),
-                  std::forward_as_tuple(msg->width, msg->height, topic.bitrate));
+                  std::forward_as_tuple(msg->width, msg->height, topic.bitrate, topic.encoder_name));
               }
               process_image(
                 convertToCvMat(*msg), topic.input_topic,
@@ -222,7 +243,11 @@ private:
         }
       } else if (msg_type == "sensor_msgs/msg/CompressedImage") {
         COLOG_DEBUG("msg_type: sensor_msgs/msg/CompressedImage");
-        const auto qos = get_publisher_qos(topic.input_topic);
+        rclcpp::QoS qos{1};
+        if (!get_publisher_qos(topic.input_topic, qos)) {
+          COLOG_WARN("there is no publisher for topic: [ %s ], retry later", topic.input_topic.c_str());
+          return;
+        }
         auto comp_sub = this->create_subscription<CompressedImage>(
           topic.input_topic, qos,
           [this, topic](CompressedImage::SharedPtr msg) {
@@ -236,7 +261,7 @@ private:
                 encoder_map_.emplace(
                   std::piecewise_construct,
                   std::forward_as_tuple(topic.input_topic),
-                  std::forward_as_tuple(decoded_img.cols, decoded_img.rows, topic.bitrate));
+                  std::forward_as_tuple(decoded_img.cols, decoded_img.rows, topic.bitrate, topic.encoder_name));
               }
               process_image(
                 decoded_img, topic.input_topic,
@@ -306,7 +331,7 @@ private:
     return image;
   }
 
-  rclcpp::QoS get_publisher_qos(const std::string & topic)
+  bool get_publisher_qos(const std::string & topic, rclcpp::QoS & qos)
   {
     // Select an appropriate subscription QOS profile. This is similar to how ros2 topic echo
     // does it:
@@ -316,11 +341,14 @@ private:
     size_t durability_transient_local_endpoints_count = 0;
 
     const auto publisher_info = this->get_publishers_info_by_topic(topic);
+    if (publisher_info.empty()) {
+      return false;
+    }
     COLOG_DEBUG("topic %s has %zu publishers", topic.c_str(), publisher_info.size());
 
     for (const auto & publisher : publisher_info) {
-      const auto & qos = publisher.qos_profile();
-      const auto profile = qos.get_rmw_qos_profile();
+      const auto & pub_qos = publisher.qos_profile();
+      const auto profile = pub_qos.get_rmw_qos_profile();
 
       COLOG_DEBUG(
         "  publisher: [%s], depth=%zu, reliability=%s, durability=%s",
@@ -337,7 +365,7 @@ private:
       if (profile.durability == RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL) {
         ++durability_transient_local_endpoints_count;
       }
-      const size_t publisher_history_depth = std::max(1ul, qos.get_rmw_qos_profile().depth);
+      const size_t publisher_history_depth = std::max(1ul, pub_qos.get_rmw_qos_profile().depth);
       depth = depth + publisher_history_depth;
     }
 
@@ -349,8 +377,8 @@ private:
         topic.c_str(), DEFAULT_MAX_QOS_DEPTH, depth);
       depth = DEFAULT_MAX_QOS_DEPTH;
     }
-
-    rclcpp::QoS qos{rclcpp::KeepLast(depth)};
+    // rclcpp::QoS qos{rclcpp::KeepLast(depth)};
+    qos.keep_last(depth);
 
     // If all endpoints are reliable, ask for reliable
     if (reliability_reliable_endpoints_count == publisher_info.size()) {
@@ -387,7 +415,7 @@ private:
       (qos.get_rmw_qos_profile().durability == RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL) ?
       "TRANSIENT_LOCAL" : "VOLATILE",
       topic.c_str());
-    return qos;
+    return true;
   }
 
   static std::string format_topics(const std::vector<std::string> & topics)
@@ -434,6 +462,7 @@ private:
   CurlClient curl_client_;
   Config config_;
 
+  std::mutex config_lock_;
   std::string config_file_path_ = "/tmp/coencoder/config";
   std::string log_directory_ = "/tmp/coencoder/log/";
   std::string log_level_ = "Info";
@@ -450,6 +479,7 @@ private:
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr encoder_ctrl_;
   std::thread config_update_thread_;
+  std::thread subscribe_update_thread_;
 
   int depth_image_max_val_ = 10000;
 };
