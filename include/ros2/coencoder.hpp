@@ -95,20 +95,20 @@ public:
       });
 
     subscribe_update_thread_ = std::thread(
-    [this]() {
-      while (rclcpp::ok() && !shutdown_requested_) {
-        try {
-          std::lock_guard<std::mutex> lock(config_lock_);
-          update(config_);
-        } catch (const std::exception & e) {
-          COLOG_ERROR("Config update failed: %s", e.what());
-        }
+      [this]() {
+        while (rclcpp::ok() && !shutdown_requested_) {
+          try {
+            std::lock_guard<std::mutex> lock(config_lock_);
+            update(config_);
+          } catch (const std::exception & e) {
+            COLOG_ERROR("Config update failed: %s", e.what());
+          }
 
-        for (int i = 0; i < 10 && !shutdown_requested_; ++i) {
-          std::this_thread::sleep_for(std::chrono::seconds(1));
+          for (int i = 0; i < 10 && !shutdown_requested_; ++i) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+          }
         }
-      }
-    });
+      });
 
 
     encoder_ctrl_ = this->create_service<std_srvs::srv::SetBool>(
@@ -214,7 +214,8 @@ private:
         COLOG_DEBUG("msg_type: sensor_msgs/msg/Image");
         rclcpp::QoS qos{1};
         if (!get_publisher_qos(topic.input_topic, qos)) {
-          COLOG_WARN("there is no publisher for topic: [ %s ], retry later", topic.input_topic.c_str());
+          COLOG_WARN(
+            "can NOT find publisher for topic: [ %s ], retry later", topic.input_topic.c_str());
           return;
         }
         auto img_sub = this->create_subscription<Image>(
@@ -226,7 +227,8 @@ private:
                 encoder_map_.emplace(
                   std::piecewise_construct,
                   std::forward_as_tuple(topic.input_topic),
-                  std::forward_as_tuple(msg->width, msg->height, topic.bitrate, topic.encoder_name));
+                  std::forward_as_tuple(
+                    msg->width, msg->height, topic.bitrate, topic.encoder_name));
               }
               process_image(
                 convertToCvMat(*msg), topic.input_topic,
@@ -245,7 +247,8 @@ private:
         COLOG_DEBUG("msg_type: sensor_msgs/msg/CompressedImage");
         rclcpp::QoS qos{1};
         if (!get_publisher_qos(topic.input_topic, qos)) {
-          COLOG_WARN("there is no publisher for topic: [ %s ], retry later", topic.input_topic.c_str());
+          COLOG_WARN(
+            "can NOT find publisher for topic: [ %s ], retry later", topic.input_topic.c_str());
           return;
         }
         auto comp_sub = this->create_subscription<CompressedImage>(
@@ -261,7 +264,8 @@ private:
                 encoder_map_.emplace(
                   std::piecewise_construct,
                   std::forward_as_tuple(topic.input_topic),
-                  std::forward_as_tuple(decoded_img.cols, decoded_img.rows, topic.bitrate, topic.encoder_name));
+                  std::forward_as_tuple(
+                    decoded_img.cols, decoded_img.rows, topic.bitrate, topic.encoder_name));
               }
               process_image(
                 decoded_img, topic.input_topic,
@@ -426,38 +430,6 @@ private:
     }
     return result;
   }
-
-  static std::string trim(const std::string & str)
-  {
-    size_t first = str.find_first_not_of(' ');
-    if (std::string::npos == first) {
-      return str;
-    }
-    size_t last = str.find_last_not_of(' ');
-    return str.substr(first, (last - first + 1));
-  }
-
-  bool get_image_size(const std::string & resolution, int & width, int & height)
-  {
-    std::string trim_str = trim(resolution);
-    size_t pos = trim_str.find('*');
-    if (pos == std::string::npos) {
-      return false;
-    }
-
-    try {
-      width = std::stoi(trim_str.substr(0, pos));
-      height = std::stoi(trim_str.substr(pos + 1));
-      return true;
-    } catch (const std::invalid_argument & e) {
-      COLOG_ERROR("invalid_argument: %s", e.what());
-      return false;
-    } catch (const std::out_of_range & e) {
-      COLOG_ERROR("out_of_range: %s", e.what());
-      return false;
-    }
-  }
-
 
   CurlClient curl_client_;
   Config config_;
