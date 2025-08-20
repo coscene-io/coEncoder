@@ -1,11 +1,4 @@
 <launch>
-    <rosparam param="/coencoder/subscribe_topics">['/camera']</rosparam>
-    <rosparam param="/coencoder/video_resolutions">['640*480']</rosparam>
-
-    <node name="coencoder" pkg="coencoder" type="coencoder" output="screen">
-        <param name="output_fps"    value="20"/>
-        <param name="bitrate"       value="400000"/>
-        <param name="depth_image_max_value" value="10000"/>
-    </node>
+    <node name="coencoder" pkg="coencoder" type="coencoder" output="screen"/>
 </launch>
 

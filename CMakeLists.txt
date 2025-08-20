@@ -13,6 +13,7 @@ pkg_check_modules(AVUTIL REQUIRED libavutil)
 pkg_check_modules(SWSCALE REQUIRED libswscale)
 
 find_package(OpenCV REQUIRED)
+find_package(CURL REQUIRED)
 
 message(STATUS "ROS_VERSION: " $ENV{ROS_VERSION})
 message(STATUS "ROS_DISTRO: " $ENV{ROS_DISTRO})
@@ -28,11 +29,12 @@ if("$ENV{ROS_VERSION}" STREQUAL "1")
             roscpp
             std_srvs
             sensor_msgs
+#            coscene_msgs
             foxglove_msgs
     )
 
     catkin_package(
-            CATKIN_DEPENDS roscpp std_srvs sensor_msgs foxglove_msgs
+            CATKIN_DEPENDS roscpp std_srvs sensor_msgs foxglove_msgs # coscene_msgs
     )
 
     include_directories(
@@ -41,11 +43,12 @@ if("$ENV{ROS_VERSION}" STREQUAL "1")
     )
 
     # Add the executable
-    add_executable(coencoder src/ros1/coencoder.cpp)
+    add_executable(coencoder src/ros1/main.cpp)
 
     target_include_directories(coencoder
             SYSTEM PRIVATE
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor>
             $<INSTALL_INTERFACE:include>
             ${catkin_INCLUDE_DIRS}
     )
@@ -58,6 +61,7 @@ if("$ENV{ROS_VERSION}" STREQUAL "1")
             ${AVFORMAT_LIBRARIES}
             ${AVUTIL_LIBRARIES}
             ${SWSCALE_LIBRARIES}
+            ${CURL_LIBRARIES}
     )
 elseif("$ENV{ROS_VERSION}" STREQUAL "2")
     message(STATUS "Building with ament_cmake")
@@ -70,15 +74,23 @@ elseif("$ENV{ROS_VERSION}" STREQUAL "2")
     find_package(rclcpp REQUIRED)
     find_package(std_srvs REQUIRED)
     find_package(sensor_msgs REQUIRED)
+#    find_package(coscene_msgs REQUIRED)
     find_package(foxglove_msgs REQUIRED)
 
-    add_executable(coencoder src/ros2/coencoder.cpp)
+    add_executable(coencoder src/ros2/main.cpp)
 
-    ament_target_dependencies(coencoder rclcpp std_srvs sensor_msgs foxglove_msgs)
+    ament_target_dependencies(coencoder
+            rclcpp
+            std_srvs
+            sensor_msgs
+#            coscene_msgs
+            foxglove_msgs
+    )
 
 
     target_include_directories(coencoder PRIVATE
             ${PROJECT_SOURCE_DIR}/include
+            ${PROJECT_SOURCE_DIR}/vendor
             ${OpenCV_INCLUDE_DIRS}
     )
 
@@ -88,6 +100,7 @@ elseif("$ENV{ROS_VERSION}" STREQUAL "2")
             ${AVCODEC_LIBRARIES}
             ${AVUTIL_LIBRARIES}
             ${SWSCALE_LIBRARIES}
+            ${CURL_LIBRARIES}
     )
 
 else()

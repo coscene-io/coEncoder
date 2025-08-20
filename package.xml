@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>coencoder</name>
-  <version>1.0.1</version>
+  <version>1.2.1</version>
   <description>The coencoder package</description>
   <maintainer email="coscene@coscene.io">coscene</maintainer>
   <license>Apache License 2.0</license>
@@ -15,15 +15,16 @@
   <depend condition="$ROS_VERSION == 2">rclcpp</depend>
 
   <depend>sensor_msgs</depend>
+<!--  <depend>coscene_msgs</depend>-->
   <depend>foxglove_msgs</depend>
   <depend>std_srvs</depend>
   <depend>image_transport</depend>
   <depend>OpenCV</depend>
 
-  <exec_depend>libavformat-dev</exec_depend>
+  <!-- <exec_depend>libavformat-dev</exec_depend> -->
   <exec_depend>libavcodec-dev</exec_depend>
   <exec_depend>libavutil-dev</exec_depend>
-  <exec_depend>libswscale-dev</exec_depend>
+  <!-- <exec_depend>libswscale-dev</exec_depend> -->
 
   <export>
     <build_type condition="$ROS_VERSION == 1">catkin</build_type>
