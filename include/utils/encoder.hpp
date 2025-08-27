@@ -61,7 +61,7 @@ public:
       COLOG_INFO("create encoder with [%s] failed, not found", encoder_name.c_str());
       throw std::runtime_error("encoder not found");
     }
-    COLOG_INFO("create encoder with [%s]", encoder_name.c_str());
+    COLOG_INFO("create encoder with [%s], image resolution: %d x %d", encoder_name.c_str(), width, height);
 
     codec_context_ = avcodec_alloc_context3(codec_);
     if (!codec_context_) {
