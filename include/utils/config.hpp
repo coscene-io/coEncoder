@@ -72,7 +72,6 @@ public:
   Config()
   {
     current_config_["enable_by_default"] = true;
-    current_config_["encoder_name"] = "libx264";
     current_config_["log_directory"] = "/tmp/coencoder/log/";
     current_config_["log_level"] = "Debug";
     current_config_["topics_param"] = nlohmann::json::array();

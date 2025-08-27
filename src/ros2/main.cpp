@@ -33,7 +33,7 @@ int main(int argc, char ** argv)
     auto node = std::make_shared<CoEncoder>(config_file);
     RCLCPP_INFO(rclcpp::get_logger("MAIN"), "CoEncoder MultiThreadedExecutor SPIN!");
 
-    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
+    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 8);
     executor.add_node(node);
     executor.spin();
   } catch (const std::exception & e) {
