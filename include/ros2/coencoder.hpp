@@ -45,9 +45,12 @@
 #include "utils/util.hpp"
 #include "utils/logger.hpp"
 #include "utils/curl_client.hpp"
+#include "utils/thread_pool.hpp"
+
+// #define ENABLE_PROFILING
 
 constexpr size_t DEFAULT_MIN_QOS_DEPTH = 1;
-constexpr size_t DEFAULT_MAX_QOS_DEPTH = 25;
+constexpr size_t DEFAULT_MAX_QOS_DEPTH = 8;
 
 using Image = sensor_msgs::msg::Image;
 using CompressedImage = sensor_msgs::msg::CompressedImage;
@@ -56,8 +59,10 @@ class CoEncoder : public rclcpp::Node
 {
 public:
   explicit CoEncoder(const std::string & config_path)
-  : Node("coencoder")
+  : Node("coencoder"), thread_pool_(1)
   {
+    RCLCPP_INFO(this->get_logger(), "CoEncoder constructor started");
+    
     if (config_path.empty()) {
       const char * home = std::getenv("HOME");
       if (!home) {
@@ -71,8 +76,24 @@ public:
     } else {
       config_file_path_ = config_path;
     }
+    
+    RCLCPP_INFO(this->get_logger(), "Config file path: %s", config_file_path_.c_str());
+    RCLCPP_INFO(this->get_logger(), "Creating directory...");
     create_directory(config_file_path_);
+    
+    RCLCPP_INFO(this->get_logger(), "Loading config...");
     config_.load_config(config_file_path_);
+
+    const size_t initial_thread_count = config_.topics_param.size();
+    RCLCPP_INFO(this->get_logger(), "Found %zu topics in config", initial_thread_count);
+    
+    if (initial_thread_count > 0) {
+      RCLCPP_INFO(this->get_logger(), "Initializing thread pool with %zu threads, before resize", initial_thread_count);
+      thread_pool_.resize(initial_thread_count);
+      RCLCPP_INFO(this->get_logger(), "Thread pool resized to %zu threads", initial_thread_count);
+    }
+    
+    RCLCPP_INFO(this->get_logger(), "Setting up logger...");
     Logger::getInstance().set_log_dir(config_.log_directory_);
     Logger::getInstance().set_log_level(config_.log_level_);
 
@@ -110,6 +131,21 @@ public:
         }
       });
 
+#ifdef ENABLE_PROFILING
+    performance_monitor_thread_ = std::thread(
+      [this]() {
+        while (rclcpp::ok() && !shutdown_requested_) {
+          try {
+            print_performance_stats();
+          } catch (const std::exception & e) {
+            COLOG_ERROR("Performance monitoring failed: %s", e.what());
+          }
+          for (int i = 0; i < 30 && !shutdown_requested_; ++i) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+          }
+        }
+      });
+#endif
 
     encoder_ctrl_ = this->create_service<std_srvs::srv::SetBool>(
       "/encoder_ctrl",
@@ -126,6 +162,8 @@ public:
           COLOG_INFO("encoder disabled");
         }
       });
+    
+    RCLCPP_INFO(this->get_logger(), "CoEncoder constructor completed successfully");
   }
 
   ~CoEncoder() override
@@ -137,6 +175,11 @@ public:
     if (subscribe_update_thread_.joinable()) {
       subscribe_update_thread_.join();
     }
+#ifdef ENABLE_PROFILING
+    if (performance_monitor_thread_.joinable()) {
+      performance_monitor_thread_.join();
+    }
+#endif
   }
 
 private:
@@ -172,6 +215,15 @@ private:
     encoding_enabled_ = cfg.enable_by_default_;
     Logger::getInstance().set_log_dir(cfg.log_directory_);
     Logger::getInstance().set_log_level(cfg.log_level_);
+
+    const size_t new_thread_count = cfg.topics_param.size();
+    if (new_thread_count > 0) {
+      size_t current_thread_count = thread_pool_.get_thread_count();
+      if (current_thread_count != new_thread_count) {
+        COLOG_INFO("Resizing thread pool from %zu to %zu threads", current_thread_count, new_thread_count);
+        thread_pool_.resize(new_thread_count);
+      }
+    }
 
     const auto & diff = findSetsDifference(subscribed_topics_params_, cfg.topics_param);
     if (!diff.isIdentical()) {
@@ -222,21 +274,39 @@ private:
           topic.input_topic, qos,
           [this, topic](Image::SharedPtr msg) {
             if (encoding_enabled_) {
-              if (encoder_map_.count(topic.input_topic) == 0) {
+#ifdef ENABLE_PROFILING
+              ++frame_count_[topic.input_topic];
+#endif
+              if (encoder_map_.count(topic.output_topic) == 0) {
                 COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
-                encoder_map_.emplace(
-                  std::piecewise_construct,
-                  std::forward_as_tuple(topic.input_topic),
-                  std::forward_as_tuple(
-                    msg->width, msg->height, topic.bitrate, topic.encoder_name));
+                try {
+                  encoder_map_.emplace(
+                    std::piecewise_construct,
+                    std::forward_as_tuple(topic.output_topic),
+                    std::forward_as_tuple(
+                      msg->width, msg->height, topic.bitrate, topic.encoder_name));
+                  COLOG_DEBUG("encoder [%s] created successfully", topic.output_topic.c_str());
+                } catch (const std::exception& e) {
+                  COLOG_ERROR("Failed to create encoder [%s]: %s", topic.output_topic.c_str(), e.what());
+                  return;
+                }
               }
+              
+              COLOG_DEBUG("Processing image for topic [%s]", topic.output_topic.c_str());
               process_image(
-                convertToCvMat(*msg), topic.input_topic,
+                convertToCvMat(*msg), topic.output_topic,
                 static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nanosec));
             }
           });
         subscribed_topics_params_.emplace(topic);
         image_sub_.emplace(topic.input_topic, img_sub);
+
+#ifdef ENABLE_PROFILING
+        frame_count_[topic.input_topic] = 0;
+        processed_count_[topic.input_topic] = 0;
+        last_frame_time_[topic.input_topic] = std::chrono::steady_clock::now();
+#endif
+        
         COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
         if (publisher_map_.count(topic.input_topic) == 0) {
           COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
@@ -255,25 +325,35 @@ private:
           topic.input_topic, qos,
           [this, topic](CompressedImage::SharedPtr msg) {
             if (encoding_enabled_) {
+
+#ifdef ENABLE_PROFILING
+              ++frame_count_[topic.input_topic];
+#endif
               const cv::Mat decoded_img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_UNCHANGED);
               if (decoded_img.empty()) {
                 return;
               }
-              if (encoder_map_.count(topic.input_topic) == 0) {
+              if (encoder_map_.count(topic.output_topic) == 0) {
                 COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
                 encoder_map_.emplace(
                   std::piecewise_construct,
-                  std::forward_as_tuple(topic.input_topic),
+                  std::forward_as_tuple(topic.output_topic),
                   std::forward_as_tuple(
                     decoded_img.cols, decoded_img.rows, topic.bitrate, topic.encoder_name));
               }
               process_image(
-                decoded_img, topic.input_topic,
+                decoded_img, topic.output_topic,
                 static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nanosec));
             }
           });
         subscribed_topics_params_.emplace(topic);
         comp_image_sub_.emplace(topic.input_topic, comp_sub);
+
+#ifdef ENABLE_PROFILING
+        frame_count_[topic.input_topic] = 0;
+        processed_count_[topic.input_topic] = 0;
+        last_frame_time_[topic.input_topic] = std::chrono::steady_clock::now();
+#endif
         COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
         if (publisher_map_.count(topic.input_topic) == 0) {
           COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
@@ -291,22 +371,71 @@ private:
   void process_image(const cv::Mat & img, const std::string & topic, const int64_t & timestamp)
   {
     if (img.empty()) {
+      COLOG_WARN("Empty image received for topic: %s", topic.c_str());
       return;
     }
 
+    COLOG_DEBUG("Enqueueing image processing for topic: %s", topic.c_str());
+    try {
+      thread_pool_.enqueue([this, img, topic, timestamp]() {
+        COLOG_DEBUG("Starting image processing in thread pool for topic: %s", topic.c_str());
+        process_image_single(img, topic, timestamp);
+        COLOG_DEBUG("Completed image processing in thread pool for topic: %s", topic.c_str());
+      });
+      COLOG_DEBUG("Successfully enqueued image processing for topic: %s", topic.c_str());
+    } catch (const std::exception& e) {
+      COLOG_ERROR("Failed to enqueue image processing for topic %s: %s", topic.c_str(), e.what());
+    }
+  }
+
+  void process_image_single(const cv::Mat & img, const std::string & topic, const int64_t & timestamp)
+  {
+    COLOG_DEBUG("process_image_single called for topic: %s", topic.c_str());
+    
     const auto encoder_it = encoder_map_.find(topic);
     if (encoder_it == encoder_map_.end()) {
       COLOG_WARN("Encoder not found for topic: %s", topic.c_str());
       return;
     }
+    
+    COLOG_DEBUG("Found encoder for topic: %s", topic.c_str());
 
     try {
-      encoder_it->second.send_frame(img, timestamp);
+      COLOG_DEBUG("Sending frame to encoder for topic: %s", topic.c_str());
+      COLOG_DEBUG("Image info: %dx%d, %d channels", img.cols, img.rows, img.channels());
+      
+      try {
+        encoder_it->second.send_frame(img, timestamp);
+        COLOG_DEBUG("send_frame completed for topic: %s", topic.c_str());
+      } catch (const std::exception& e) {
+        COLOG_ERROR("send_frame failed for topic %s: %s", topic.c_str(), e.what());
+        return;
+      } catch (...) {
+        COLOG_ERROR("send_frame failed for topic %s with unknown exception", topic.c_str());
+        return;
+      }
+      
+      COLOG_DEBUG("Encoding frame for topic: %s", topic.c_str());
       const auto frame = encoder_it->second.encode_frame();
+      
       if (frame) {
+        COLOG_DEBUG("Frame encoded successfully for topic: %s", topic.c_str());
         const auto pub_it = publisher_map_.find(topic);
         if (pub_it != publisher_map_.end()) {
+          COLOG_DEBUG("Publishing encoded frame for topic: %s", topic.c_str());
           pub_it->second->publish(*frame);
+
+#ifdef ENABLE_PROFILING
+          const auto start_time = std::chrono::steady_clock::now();
+          ++processed_count_[topic];
+          last_frame_time_[topic] = start_time;
+          if (processed_count_[topic] % 100 == 0) {
+            auto now = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time);
+            COLOG_INFO("Topic [%s] processed %lu frames, last frame took %ld ms", 
+                      topic.c_str(), processed_count_[topic].load(), duration.count());
+          }
+#endif
         }
       }
     } catch (const std::exception & e) {
@@ -431,6 +560,30 @@ private:
     return result;
   }
 
+#ifdef ENABLE_PROFILING
+  void print_performance_stats()
+  {
+    COLOG_INFO("========== Performance Statistics ==========");
+    COLOG_INFO("Thread Pool: %zu threads, %zu queued tasks", 
+              thread_pool_.get_thread_count(), thread_pool_.get_queue_size());
+    
+    for (const auto& pair : frame_count_) {
+      const std::string& topic = pair.first;
+      const auto& frame_count = pair.second;
+      auto processed = processed_count_[topic].load();
+      auto now = std::chrono::steady_clock::now();
+      auto last_time = last_frame_time_[topic];
+      auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_time);
+      
+      double fps = (duration.count() > 0) ? (processed / (double)duration.count()) : 0.0;
+      
+      COLOG_INFO("Topic [%s]: Received=%lu, Processed=%lu, FPS=%.2f, Last processed: %lds ago", 
+                topic.c_str(), frame_count.load(), processed, fps, duration.count());
+    }
+    COLOG_INFO("==========================================");
+  }
+#endif
+
   CurlClient curl_client_;
   Config config_;
 
@@ -449,11 +602,19 @@ private:
   std::map<std::string, std::shared_ptr<rclcpp::Publisher<CompressedVideo>>> publisher_map_;
   std::map<std::string, H264Encoder> encoder_map_;
 
+#ifdef ENABLE_PROFILING
+  std::map<std::string, std::atomic<uint64_t>> frame_count_;
+  std::map<std::string, std::atomic<uint64_t>> processed_count_;
+  std::map<std::string, std::chrono::steady_clock::time_point> last_frame_time_;
+  std::thread performance_monitor_thread_;
+#endif
+
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr encoder_ctrl_;
   std::thread config_update_thread_;
   std::thread subscribe_update_thread_;
 
   int depth_image_max_val_ = 10000;
+  ThreadPool thread_pool_;
 };
 
 #endif  // ROS2__COENCODER_HPP_
