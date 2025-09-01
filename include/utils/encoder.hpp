@@ -166,24 +166,19 @@ public:
   void send_frame(const cv::Mat & img, const int64_t & timestamp)
   {
     try {
-      COLOG_DEBUG("send_frame started for image %dx%d, %d channels", img.cols, img.rows, img.channels());
       
       received_ = true;
       std::lock_guard<std::mutex> lock(mutex_);
-      
-      COLOG_DEBUG("Mutex acquired, starting image conversion");
+
       cv::Mat yuv_img;
 
       if (img.channels() == 1) {
-        COLOG_DEBUG("Converting 1-channel image");
         cv::Mat bgr_img;
         cv::cvtColor(img, bgr_img, cv::COLOR_GRAY2BGR);
         cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
       } else if (img.channels() == 3) {
-        COLOG_DEBUG("Converting 3-channel image");
         cv::cvtColor(img, yuv_img, cv::COLOR_BGR2YUV_I420);
       } else if (img.channels() == 4) {
-        COLOG_DEBUG("Converting 4-channel image");
         cv::Mat bgr_img;
         cv::cvtColor(img, bgr_img, cv::COLOR_BGRA2BGR);
         cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
@@ -191,51 +186,40 @@ public:
         COLOG_ERROR("Unsupported image channels: %d", img.channels());
         return;
       }
-      
-      COLOG_DEBUG("Image conversion completed, yuv_img size: %dx%d", yuv_img.cols, yuv_img.rows);
 
       if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
-        COLOG_DEBUG("Processing NV12 format");
         const int y_size = codec_context_->width * codec_context_->height;
         const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 
-        COLOG_DEBUG("Copying Y data, size: %d", y_size);
         memcpy(frame_->data[0], yuv_img.data, y_size);
 
         const uint8_t * u_src = yuv_img.data + y_size;
         const uint8_t * v_src = yuv_img.data + y_size + uv_size;
         uint8_t * uv_dst = frame_->data[1];
 
-        COLOG_DEBUG("Processing UV data, size: %d", uv_size);
         for (int i = 0; i < uv_size; i++) {
           uv_dst[i * 2] = u_src[i];
           uv_dst[i * 2 + 1] = v_src[i];
         }
       } else {
-        COLOG_DEBUG("Processing I420 format");
         int y_size = codec_context_->width * codec_context_->height;
         int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 
-        COLOG_DEBUG("Copying YUV data, y_size: %d, uv_size: %d", y_size, uv_size);
         memcpy(frame_->data[0], yuv_img.data, y_size);
         memcpy(frame_->data[1], yuv_img.data + y_size, uv_size);
         memcpy(frame_->data[2], yuv_img.data + y_size + uv_size, uv_size);
       }
 
-      COLOG_DEBUG("Setting frame timestamp: %ld", timestamp);
       frame_->pts = timestamp;
-      
-      COLOG_DEBUG("Calling avcodec_send_frame");
+
       const int ret = avcodec_send_frame(codec_context_, frame_);
       if (ret < 0) {
         char err_buf[128];
         av_strerror(ret, err_buf, sizeof(err_buf));
         COLOG_WARN("send frame to encoder failed: %s", err_buf);
       } else {
-        COLOG_DEBUG("avcodec_send_frame completed successfully");
       }
-      
-      COLOG_DEBUG("send_frame completed successfully");
+
     } catch (const std::exception& e) {
       COLOG_ERROR("Exception in send_frame: %s", e.what());
       throw;

@@ -30,33 +30,22 @@
 class ThreadPool {
 public:
     explicit ThreadPool(const size_t threads) : stop_(false) {
-        std::cout << "ThreadPool constructor called with " << threads << " threads" << std::endl;
-        // 直接创建指定数量的线程，不调用resize
         create_workers(threads);
-        std::cout << "ThreadPool constructor completed, created " << workers_.size() << " threads" << std::endl;
     }
 
     void resize(const size_t new_thread_count) {
-        std::cout << "ThreadPool resize called: " << workers_.size() << " -> " << new_thread_count << std::endl;
-        
         if (new_thread_count == workers_.size()) {
-            std::cout << "Thread count unchanged, skipping resize" << std::endl;
             return;
         }
         
         std::unique_lock<std::mutex> lock(queue_mutex_);
         
         if (new_thread_count > workers_.size()) {
-            // 增加线程数量，不需要停止现有线程
-            std::cout << "Adding " << (new_thread_count - workers_.size()) << " new threads..." << std::endl;
             create_workers(new_thread_count - workers_.size());
         } else {
-            // 减少线程数量，需要停止多余的线程
-            std::cout << "Reducing threads from " << workers_.size() << " to " << new_thread_count << std::endl;
             stop_ = true;
             condition_.notify_all();
             
-            // 等待所有线程完成当前任务
             for(std::thread &worker: workers_) {
                 if(worker.joinable()) {
                     worker.join();
@@ -66,22 +55,14 @@ public:
             workers_.clear();
             stop_ = false;
             
-            // 重新创建指定数量的线程
             create_workers(new_thread_count);
         }
-        
-        std::cout << "ThreadPool resize completed, now has " << workers_.size() << " threads" << std::endl;
     }
 
-    template<class F, class... Args>
-    auto enqueue(F&& f, Args&&... args) 
-        -> std::future<typename std::result_of<F(Args...)>::type> {
-        using return_type = typename std::result_of<F(Args...)>::type;
-
-        auto task = std::make_shared<std::packaged_task<return_type()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-        );
-        
+    template<class F>
+    auto enqueue(F&& f) -> std::future<decltype(f())> {
+        using return_type = decltype(f());
+        auto task = std::make_shared<std::packaged_task<return_type()>>(std::forward<F>(f));
         std::future<return_type> res = task->get_future();
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
@@ -89,7 +70,7 @@ public:
                 throw std::runtime_error("enqueue on stopped ThreadPool");
             tasks_.emplace([task](){ (*task)(); });
         }
-        condition_.notify_one();
+        condition_.notify_one();  // Use notify_one to reduce wake-up overhead
         return res;
     }
 
@@ -104,7 +85,6 @@ public:
     }
 
     ~ThreadPool() {
-        std::cout << "ThreadPool destructor called" << std::endl;
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
             stop_ = true;
@@ -115,7 +95,6 @@ public:
                 worker.join();
             }
         }
-        std::cout << "ThreadPool destructor completed" << std::endl;
     }
 
 private:

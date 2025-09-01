@@ -47,7 +47,7 @@
 #include "utils/curl_client.hpp"
 #include "utils/thread_pool.hpp"
 
-// #define ENABLE_PROFILING
+#define ENABLE_PROFILING
 
 constexpr size_t DEFAULT_MIN_QOS_DEPTH = 1;
 constexpr size_t DEFAULT_MAX_QOS_DEPTH = 8;
@@ -84,11 +84,11 @@ public:
     RCLCPP_INFO(this->get_logger(), "Loading config...");
     config_.load_config(config_file_path_);
 
-    const size_t initial_thread_count = config_.topics_param.size();
-    RCLCPP_INFO(this->get_logger(), "Found %zu topics in config", initial_thread_count);
+    const size_t initial_thread_count = config_.topics_param.size();  // Keep thread count same as topic count
+    RCLCPP_INFO(this->get_logger(), "Found %zu topics in config", config_.topics_param.size());
     
     if (initial_thread_count > 0) {
-      RCLCPP_INFO(this->get_logger(), "Initializing thread pool with %zu threads, before resize", initial_thread_count);
+      RCLCPP_INFO(this->get_logger(), "Initializing thread pool with %zu threads (one per topic)", initial_thread_count);
       thread_pool_.resize(initial_thread_count);
       RCLCPP_INFO(this->get_logger(), "Thread pool resized to %zu threads", initial_thread_count);
     }
@@ -140,11 +140,12 @@ public:
           } catch (const std::exception & e) {
             COLOG_ERROR("Performance monitoring failed: %s", e.what());
           }
-          for (int i = 0; i < 30 && !shutdown_requested_; ++i) {
+          for (int i = 0; i < 10 && !shutdown_requested_; ++i) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
           }
         }
       });
+    last_performance_ = std::chrono::high_resolution_clock::now();
 #endif
 
     encoder_ctrl_ = this->create_service<std_srvs::srv::SetBool>(
@@ -216,11 +217,11 @@ private:
     Logger::getInstance().set_log_dir(cfg.log_directory_);
     Logger::getInstance().set_log_level(cfg.log_level_);
 
-    const size_t new_thread_count = cfg.topics_param.size();
+    const size_t new_thread_count = cfg.topics_param.size();  // Keep thread count same as topic count
     if (new_thread_count > 0) {
       size_t current_thread_count = thread_pool_.get_thread_count();
       if (current_thread_count != new_thread_count) {
-        COLOG_INFO("Resizing thread pool from %zu to %zu threads", current_thread_count, new_thread_count);
+        COLOG_INFO("Resizing thread pool from %zu to %zu threads (one per topic)", current_thread_count, new_thread_count);
         thread_pool_.resize(new_thread_count);
       }
     }
@@ -238,17 +239,17 @@ private:
 
   void removing_topic(const TopicParam & topic)
   {
-    COLOG_DEBUG("removing topic [ %s ] from subscription list", topic.input_topic.c_str());
-    publisher_map_.erase(topic.input_topic);
+    COLOG_DEBUG("removing topic [ %s ] from subscription list", topic.output_topic.c_str());
+    publisher_map_.erase(topic.output_topic);
 
-    COLOG_DEBUG("destruct encoder of topic [ %s ]", topic.input_topic.c_str());
-    encoder_map_.erase(topic.input_topic);
+    COLOG_DEBUG("destruct encoder of topic [ %s ]", topic.output_topic.c_str());
+    encoder_map_.erase(topic.output_topic);
     subscribed_topics_params_.erase(topic);
 
-    if (image_sub_.find(topic.input_topic) != image_sub_.end()) {
-      image_sub_.erase(topic.input_topic);
-    } else if (comp_image_sub_.find(topic.input_topic) != comp_image_sub_.end()) {
-      comp_image_sub_.erase(topic.input_topic);
+    if (image_sub_.find(topic.output_topic) != image_sub_.end()) {
+      image_sub_.erase(topic.output_topic);
+    } else if (comp_image_sub_.find(topic.output_topic) != comp_image_sub_.end()) {
+      comp_image_sub_.erase(topic.output_topic);
     }
   }
 
@@ -275,7 +276,7 @@ private:
           [this, topic](Image::SharedPtr msg) {
             if (encoding_enabled_) {
 #ifdef ENABLE_PROFILING
-              ++frame_count_[topic.input_topic];
+              ++frame_count_[topic.output_topic];
 #endif
               if (encoder_map_.count(topic.output_topic) == 0) {
                 COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
@@ -292,26 +293,50 @@ private:
                 }
               }
               
-              COLOG_DEBUG("Processing image for topic [%s]", topic.output_topic.c_str());
-              process_image(
-                convertToCvMat(*msg), topic.output_topic,
-                static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nanosec));
+              auto cv_img = convertToCvMat(*msg);
+              auto timestamp = static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nanosec);
+              thread_pool_.enqueue([this, cv_img, topic, timestamp]() {
+                try {
+                  const auto encoder_it = encoder_map_.find(topic.output_topic);
+                  if (encoder_it == encoder_map_.end()) {
+                    COLOG_WARN("Encoder not found for topic: %s", topic.output_topic.c_str());
+                    return;
+                  }
+
+                  encoder_it->second.send_frame(cv_img, timestamp);
+
+                  const auto frame = encoder_it->second.encode_frame();
+                  if (frame) {
+                    const auto pub_it = publisher_map_.find(topic.output_topic);
+                    if (pub_it != publisher_map_.end()) {
+                      pub_it->second->publish(*frame);
+#ifdef ENABLE_PROFILING
+                      ++processed_count_[topic.output_topic];
+#endif
+                    }
+                  }
+
+                } catch (const std::exception& e) {
+                  COLOG_ERROR("Exception in thread pool processing for topic %s: %s", topic.output_topic.c_str(), e.what());
+                } catch (...) {
+                  COLOG_ERROR("Unknown exception in thread pool processing for topic %s", topic.output_topic.c_str());
+                }
+              });
             }
           });
         subscribed_topics_params_.emplace(topic);
-        image_sub_.emplace(topic.input_topic, img_sub);
+        image_sub_.emplace(topic.output_topic, img_sub);
 
 #ifdef ENABLE_PROFILING
-        frame_count_[topic.input_topic] = 0;
-        processed_count_[topic.input_topic] = 0;
-        last_frame_time_[topic.input_topic] = std::chrono::steady_clock::now();
+        frame_count_[topic.output_topic] = 0;
+        processed_count_[topic.output_topic] = 0;
 #endif
         
         COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
-        if (publisher_map_.count(topic.input_topic) == 0) {
+        if (publisher_map_.count(topic.output_topic) == 0) {
           COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
           const auto pub = this->create_publisher<CompressedVideo>(topic.output_topic, 10);
-          publisher_map_.emplace(topic.input_topic, pub);
+          publisher_map_.emplace(topic.output_topic, pub);
         }
       } else if (msg_type == "sensor_msgs/msg/CompressedImage") {
         COLOG_DEBUG("msg_type: sensor_msgs/msg/CompressedImage");
@@ -327,7 +352,7 @@ private:
             if (encoding_enabled_) {
 
 #ifdef ENABLE_PROFILING
-              ++frame_count_[topic.input_topic];
+              ++frame_count_[topic.output_topic];
 #endif
               const cv::Mat decoded_img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_UNCHANGED);
               if (decoded_img.empty()) {
@@ -341,105 +366,57 @@ private:
                   std::forward_as_tuple(
                     decoded_img.cols, decoded_img.rows, topic.bitrate, topic.encoder_name));
               }
-              process_image(
-                decoded_img, topic.output_topic,
-                static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nanosec));
+              auto timestamp = static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nanosec);
+              const auto start = std::chrono::high_resolution_clock::now();
+              thread_pool_.enqueue([this, decoded_img, topic, timestamp]() {
+                try {
+                  const auto encoder_it = encoder_map_.find(topic.output_topic);
+                  if (encoder_it == encoder_map_.end()) {
+                    COLOG_WARN("Encoder not found for topic: %s", topic.output_topic.c_str());
+                    return;
+                  }
+
+                  encoder_it->second.send_frame(decoded_img, timestamp);
+
+                  const auto frame = encoder_it->second.encode_frame();
+                  if (frame) {
+                    const auto pub_it = publisher_map_.find(topic.output_topic);
+                    if (pub_it != publisher_map_.end()) {
+                      pub_it->second->publish(*frame);
+#ifdef ENABLE_PROFILING
+                      ++processed_count_[topic.output_topic];
+#endif
+                    }
+                  }
+                } catch (const std::exception& e) {
+                  COLOG_ERROR("Exception in thread pool processing for topic %s: %s", topic.output_topic.c_str(), e.what());
+                } catch (...) {
+                  COLOG_ERROR("Unknown exception in thread pool processing for topic %s", topic.output_topic.c_str());
+                }
+              });
+
+              const auto end = std::chrono::high_resolution_clock::now();
+              COLOG_DEBUG("enqueue takes %d ns", (end - start).count());
             }
           });
         subscribed_topics_params_.emplace(topic);
-        comp_image_sub_.emplace(topic.input_topic, comp_sub);
+        comp_image_sub_.emplace(topic.output_topic, comp_sub);
 
 #ifdef ENABLE_PROFILING
-        frame_count_[topic.input_topic] = 0;
-        processed_count_[topic.input_topic] = 0;
-        last_frame_time_[topic.input_topic] = std::chrono::steady_clock::now();
+        frame_count_[topic.output_topic] = 0;
+        processed_count_[topic.output_topic] = 0;
 #endif
         COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
-        if (publisher_map_.count(topic.input_topic) == 0) {
+        if (publisher_map_.count(topic.output_topic) == 0) {
           COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
           const auto pub = this->create_publisher<CompressedVideo>(topic.output_topic, 10);
-          publisher_map_.emplace(topic.input_topic, pub);
+          publisher_map_.emplace(topic.output_topic, pub);
         }
       } else {
         COLOG_ERROR("unsupported topic type: %s", topic.input_topic.c_str());
       }
     } else {
       COLOG_WARN("topic [ %s ] not found, retry later", topic.input_topic.c_str());
-    }
-  }
-
-  void process_image(const cv::Mat & img, const std::string & topic, const int64_t & timestamp)
-  {
-    if (img.empty()) {
-      COLOG_WARN("Empty image received for topic: %s", topic.c_str());
-      return;
-    }
-
-    COLOG_DEBUG("Enqueueing image processing for topic: %s", topic.c_str());
-    try {
-      thread_pool_.enqueue([this, img, topic, timestamp]() {
-        COLOG_DEBUG("Starting image processing in thread pool for topic: %s", topic.c_str());
-        process_image_single(img, topic, timestamp);
-        COLOG_DEBUG("Completed image processing in thread pool for topic: %s", topic.c_str());
-      });
-      COLOG_DEBUG("Successfully enqueued image processing for topic: %s", topic.c_str());
-    } catch (const std::exception& e) {
-      COLOG_ERROR("Failed to enqueue image processing for topic %s: %s", topic.c_str(), e.what());
-    }
-  }
-
-  void process_image_single(const cv::Mat & img, const std::string & topic, const int64_t & timestamp)
-  {
-    COLOG_DEBUG("process_image_single called for topic: %s", topic.c_str());
-    
-    const auto encoder_it = encoder_map_.find(topic);
-    if (encoder_it == encoder_map_.end()) {
-      COLOG_WARN("Encoder not found for topic: %s", topic.c_str());
-      return;
-    }
-    
-    COLOG_DEBUG("Found encoder for topic: %s", topic.c_str());
-
-    try {
-      COLOG_DEBUG("Sending frame to encoder for topic: %s", topic.c_str());
-      COLOG_DEBUG("Image info: %dx%d, %d channels", img.cols, img.rows, img.channels());
-      
-      try {
-        encoder_it->second.send_frame(img, timestamp);
-        COLOG_DEBUG("send_frame completed for topic: %s", topic.c_str());
-      } catch (const std::exception& e) {
-        COLOG_ERROR("send_frame failed for topic %s: %s", topic.c_str(), e.what());
-        return;
-      } catch (...) {
-        COLOG_ERROR("send_frame failed for topic %s with unknown exception", topic.c_str());
-        return;
-      }
-      
-      COLOG_DEBUG("Encoding frame for topic: %s", topic.c_str());
-      const auto frame = encoder_it->second.encode_frame();
-      
-      if (frame) {
-        COLOG_DEBUG("Frame encoded successfully for topic: %s", topic.c_str());
-        const auto pub_it = publisher_map_.find(topic);
-        if (pub_it != publisher_map_.end()) {
-          COLOG_DEBUG("Publishing encoded frame for topic: %s", topic.c_str());
-          pub_it->second->publish(*frame);
-
-#ifdef ENABLE_PROFILING
-          const auto start_time = std::chrono::steady_clock::now();
-          ++processed_count_[topic];
-          last_frame_time_[topic] = start_time;
-          if (processed_count_[topic] % 100 == 0) {
-            auto now = std::chrono::steady_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time);
-            COLOG_INFO("Topic [%s] processed %lu frames, last frame took %ld ms", 
-                      topic.c_str(), processed_count_[topic].load(), duration.count());
-          }
-#endif
-        }
-      }
-    } catch (const std::exception & e) {
-      COLOG_ERROR("Encoding failed for topic %s: %s", topic.c_str(), e.what());
     }
   }
 
@@ -459,9 +436,10 @@ private:
       throw std::runtime_error("Unsupported encoding type: " + encoding);
     }
 
-    cv::Mat image(img_msg.height, img_msg.width, cv_type, const_cast<uchar *>(img_msg.data.data()),
+    const cv::Mat temp_image(img_msg.height, img_msg.width, cv_type, const_cast<uchar *>(img_msg.data.data()),
       img_msg.step);
-    return image;
+
+    return temp_image.clone();
   }
 
   bool get_publisher_qos(const std::string & topic, rclcpp::QoS & qos)
@@ -563,24 +541,29 @@ private:
 #ifdef ENABLE_PROFILING
   void print_performance_stats()
   {
-    COLOG_INFO("========== Performance Statistics ==========");
-    COLOG_INFO("Thread Pool: %zu threads, %zu queued tasks", 
+    COLOG_DEBUG("┌────────────────────────────────────────"
+                " Performance Statistics "
+                "──────────────────────────────────────────┐");
+    COLOG_DEBUG("│Thread Pool: %zu threads, %zu queued tasks "
+                "                                                                   |",
               thread_pool_.get_thread_count(), thread_pool_.get_queue_size());
-    
+    const auto now = std::chrono::high_resolution_clock::now();
     for (const auto& pair : frame_count_) {
       const std::string& topic = pair.first;
       const auto& frame_count = pair.second;
       auto processed = processed_count_[topic].load();
-      auto now = std::chrono::steady_clock::now();
-      auto last_time = last_frame_time_[topic];
-      auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_time);
-      
-      double fps = (duration.count() > 0) ? (processed / (double)duration.count()) : 0.0;
-      
-      COLOG_INFO("Topic [%s]: Received=%lu, Processed=%lu, FPS=%.2f, Last processed: %lds ago", 
-                topic.c_str(), frame_count.load(), processed, fps, duration.count());
+      const auto time_elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_performance_);
+      const auto fps = static_cast<float>(frame_count.load()) / static_cast<float>(time_elapsed.count()) * 1000.0f;
+
+      COLOG_DEBUG("├ Topic [%s]: Received=%lu, Processed=%lu, frame rate: %f from last statistics│",
+                topic.c_str(), frame_count.load(), processed, fps);
+      frame_count_[topic] = 0;
+      processed_count_[topic] = 0;
     }
-    COLOG_INFO("==========================================");
+    COLOG_DEBUG("└─────────────────────────────────────────────────────"
+                "─────────────────────────────────────────────────────┘");
+    last_performance_ = now;
   }
 #endif
 
@@ -605,8 +588,8 @@ private:
 #ifdef ENABLE_PROFILING
   std::map<std::string, std::atomic<uint64_t>> frame_count_;
   std::map<std::string, std::atomic<uint64_t>> processed_count_;
-  std::map<std::string, std::chrono::steady_clock::time_point> last_frame_time_;
   std::thread performance_monitor_thread_;
+  std::chrono::time_point<std::chrono::high_resolution_clock> last_performance_;
 #endif
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr encoder_ctrl_;
