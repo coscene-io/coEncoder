@@ -50,7 +50,7 @@
 #define ENABLE_PROFILING
 
 constexpr size_t DEFAULT_MIN_QOS_DEPTH = 1;
-constexpr size_t DEFAULT_MAX_QOS_DEPTH = 8;
+constexpr size_t DEFAULT_MAX_QOS_DEPTH = 100;  // Increase QoS depth for high frame rate
 
 using Image = sensor_msgs::msg::Image;
 using CompressedImage = sensor_msgs::msg::CompressedImage;
@@ -556,7 +556,7 @@ private:
         std::chrono::duration_cast<std::chrono::milliseconds>(now - last_performance_);
       const auto fps = static_cast<float>(frame_count.load()) / static_cast<float>(time_elapsed.count()) * 1000.0f;
 
-      COLOG_DEBUG("├ Topic [%s]: Received=%lu, Processed=%lu, frame rate: %f from last statistics│",
+      COLOG_DEBUG("├ Topic [%s]: Received=%lu, Published=%lu, Frame rate: %f from last statistics│",
                 topic.c_str(), frame_count.load(), processed, fps);
       frame_count_[topic] = 0;
       processed_count_[topic] = 0;
