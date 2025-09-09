@@ -25,104 +25,117 @@
 #include <functional>
 #include <stdexcept>
 #include <atomic>
-#include <iostream>
+#include <utility>
 
-class ThreadPool {
+class ThreadPool
+{
 public:
-    explicit ThreadPool(const size_t threads) : stop_(false) {
-        create_workers(threads);
+  explicit ThreadPool(const size_t threads)
+  : stop_(false)
+  {
+    create_workers(threads);
+  }
+
+  void resize(const size_t new_thread_count)
+  {
+    if (new_thread_count == workers_.size()) {
+      return;
     }
 
-    void resize(const size_t new_thread_count) {
-        if (new_thread_count == workers_.size()) {
-            return;
-        }
-        
-        std::unique_lock<std::mutex> lock(queue_mutex_);
-        
-        if (new_thread_count > workers_.size()) {
-            create_workers(new_thread_count - workers_.size());
-        } else {
-            stop_ = true;
-            condition_.notify_all();
-            
-            for(std::thread &worker: workers_) {
-                if(worker.joinable()) {
-                    worker.join();
-                }
-            }
-            
-            workers_.clear();
-            stop_ = false;
-            
-            create_workers(new_thread_count);
-        }
-    }
+    std::unique_lock<std::mutex> lock(queue_mutex_);
 
-    template<class F>
-    auto enqueue(F&& f) -> std::future<decltype(f())> {
-        using return_type = decltype(f());
-        auto task = std::make_shared<std::packaged_task<return_type()>>(std::forward<F>(f));
-        std::future<return_type> res = task->get_future();
-        {
-            std::unique_lock<std::mutex> lock(queue_mutex_);
-            if(stop_)
-                throw std::runtime_error("enqueue on stopped ThreadPool");
-            tasks_.emplace([task](){ (*task)(); });
-        }
-        condition_.notify_one();  // Use notify_one to reduce wake-up overhead
-        return res;
-    }
+    if (new_thread_count > workers_.size()) {
+      create_workers(new_thread_count - workers_.size());
+    } else {
+      stop_ = true;
+      condition_.notify_all();
 
-    size_t get_thread_count() const {
-        std::unique_lock<std::mutex> lock(queue_mutex_);
-        return workers_.size();
-    }
-
-    size_t get_queue_size() const {
-        std::unique_lock<std::mutex> lock(queue_mutex_);
-        return tasks_.size();
-    }
-
-    ~ThreadPool() {
-        {
-            std::unique_lock<std::mutex> lock(queue_mutex_);
-            stop_ = true;
+      for (std::thread & worker : workers_) {
+        if (worker.joinable()) {
+          worker.join();
         }
-        condition_.notify_all();
-        for(std::thread &worker: workers_) {
-            if(worker.joinable()) {
-                worker.join();
-            }
-        }
+      }
+
+      workers_.clear();
+      stop_ = false;
+
+      create_workers(new_thread_count);
     }
+  }
+
+  template<class F>
+  auto enqueue(F && f)->std::future<decltype(f())>
+  {
+    using return_type = decltype(f());
+    auto task = std::make_shared<std::packaged_task<return_type()>>(std::forward<F>(f));
+    std::future<return_type> res = task->get_future();
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex_);
+      if (stop_) {
+        throw std::runtime_error("enqueue on stopped ThreadPool");
+      }
+      tasks_.emplace([task]() {(*task)();});
+    }
+    condition_.notify_one();      // Use notify_one to reduce wake-up overhead
+    return res;
+  }
+
+  size_t get_thread_count() const
+  {
+    std::unique_lock<std::mutex> lock(queue_mutex_);
+    return workers_.size();
+  }
+
+  size_t get_queue_size() const
+  {
+    std::unique_lock<std::mutex> lock(queue_mutex_);
+    return tasks_.size();
+  }
+
+  ~ThreadPool()
+  {
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex_);
+      stop_ = true;
+    }
+    condition_.notify_all();
+    for (std::thread & worker : workers_) {
+      if (worker.joinable()) {
+        worker.join();
+      }
+    }
+  }
 
 private:
-    void create_workers(size_t count) {
-        for(size_t i = 0; i < count; ++i) {
-            workers_.emplace_back([this] {
-                for(;;) {
-                    std::function<void()> task;
-                    {
-                        std::unique_lock<std::mutex> lock(this->queue_mutex_);
-                        this->condition_.wait(lock,
-                            [this]{ return this->stop_ || !this->tasks_.empty(); });
-                        if(this->stop_ && this->tasks_.empty())
-                            return;
-                        task = std::move(this->tasks_.front());
-                        this->tasks_.pop();
-                    }
-                    task();
-                }
-            });
-        }
+  void create_workers(size_t count)
+  {
+    for (size_t i = 0; i < count; ++i) {
+      workers_.emplace_back(
+        [this] {
+          for (;; ) {
+            std::function<void()> task;
+            {
+              std::unique_lock<std::mutex> lock(this->queue_mutex_);
+              this->condition_.wait(
+                lock,
+                [this] {return this->stop_ || !this->tasks_.empty();});
+              if (this->stop_ && this->tasks_.empty()) {
+                return;
+              }
+              task = std::move(this->tasks_.front());
+              this->tasks_.pop();
+            }
+            task();
+          }
+        });
     }
+  }
 
-    mutable std::mutex queue_mutex_;
-    std::vector<std::thread> workers_;
-    std::queue<std::function<void()>> tasks_;
-    std::condition_variable condition_;
-    std::atomic<bool> stop_;
+  mutable std::mutex queue_mutex_;
+  std::vector<std::thread> workers_;
+  std::queue<std::function<void()>> tasks_;
+  std::condition_variable condition_;
+  std::atomic<bool> stop_;
 };
 
 #endif  // UTILS__THREAD_POOL_HPP_

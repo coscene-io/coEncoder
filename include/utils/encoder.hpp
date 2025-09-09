@@ -77,7 +77,6 @@ public:
     codec_context_->rc_min_rate = bitrate_;
 
     codec_context_->time_base = (AVRational) {1, 1000};
-    codec_context_->framerate = (AVRational) {30, 1};
     codec_context_->gop_size = 30;
     codec_context_->max_b_frames = 0;
 
@@ -163,10 +162,20 @@ public:
     }
   }
 
+
+  /**
+   * @brief Send a frame to the encoder for processing
+   *
+   * This function converts the input image to the required format and sends it to the H.264 encoder.
+   * The encoder will process the frame and store it in its internal buffer.
+   *
+   * @param img Input image in OpenCV Mat format (BGR, RGB, or grayscale)
+   * @param timestamp Frame timestamp in MILISECONDS (used for PTS calculation)
+   *
+   */
   void send_frame(const cv::Mat & img, const int64_t & timestamp)
   {
     try {
-      
       received_ = true;
       std::lock_guard<std::mutex> lock(mutex_);
 
@@ -217,10 +226,8 @@ public:
         char err_buf[128];
         av_strerror(ret, err_buf, sizeof(err_buf));
         COLOG_WARN("send frame to encoder failed: %s", err_buf);
-      } else {
       }
-
-    } catch (const std::exception& e) {
+    } catch (const std::exception & e) {
       COLOG_ERROR("Exception in send_frame: %s", e.what());
       throw;
     } catch (...) {
@@ -229,6 +236,14 @@ public:
     }
   }
 
+  /**
+   * @brief Retrieve an encoded frame from the encoder
+   *
+   * This function attempts to get an encoded H.264 frame from the encoder's output buffer.
+   * The encoder processes frames asynchronously, so this function may not always return a frame.
+   *
+   * @return std::shared_ptr<CompressedVideo> Encoded video frame, or nullptr if no frame is available
+   */
   CompressedVideoPtr encode_frame()
   {
     if (!received_) {

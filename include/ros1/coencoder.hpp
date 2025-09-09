@@ -47,7 +47,7 @@ class CoEncoder
 {
 public:
   explicit CoEncoder(const std::string & config_file)
-  : nh_("~"), thread_pool_(1)  // 初始化为1个线程，后续根据配置动态调整
+  : nh_("~"), thread_pool_(1)
   {
     const char * home = std::getenv("HOME");
     if (config_file.empty()) {
@@ -64,14 +64,15 @@ public:
     }
     create_directory(config_file_path_);
     config_.load_config(config_file_path_);
-    
-    // 根据配置中的topic数量初始化线程池
+
     size_t initial_thread_count = config_.topics_param.size();
     if (initial_thread_count > 0) {
       thread_pool_.resize(initial_thread_count);
-      COLOG_INFO("Initialized thread pool with %zu threads for %zu topics", initial_thread_count, initial_thread_count);
+      COLOG_INFO(
+        "Initialized thread pool with %zu threads for %zu topics", initial_thread_count,
+        initial_thread_count);
     }
-    
+
     update_logger(config_.log_directory_, config_.log_level_);
 
     COLOG_INFO("============================== coEncoder started ==============================");
@@ -117,7 +118,9 @@ private:
     if (new_thread_count > 0) {
       size_t current_thread_count = thread_pool_.get_thread_count();
       if (current_thread_count != new_thread_count) {
-        COLOG_INFO("Resizing thread pool from %zu to %zu threads", current_thread_count, new_thread_count);
+        COLOG_INFO(
+          "Resizing thread pool from %zu to %zu threads", current_thread_count,
+          new_thread_count);
         thread_pool_.resize(new_thread_count);
       }
     }
@@ -267,12 +270,15 @@ private:
     }
 
     // 提交到线程池异步处理，避免阻塞主线程
-    thread_pool_.enqueue([this, img, topic, timestamp]() {
-      process_image_single(img, topic, timestamp);
-    });
+    thread_pool_.enqueue(
+      [this, img, topic, timestamp]() {
+        process_image_single(img, topic, timestamp);
+      });
   }
 
-  void process_image_single(const cv::Mat & img, const std::string & topic, const int64_t & timestamp)
+  void process_image_single(
+    const cv::Mat & img, const std::string & topic,
+    const int64_t & timestamp)
   {
     auto encoder_it = encoder_map_.find(topic);
     if (encoder_it == encoder_map_.end()) {
@@ -326,7 +332,7 @@ private:
   int bitrate_ = 800000, depth_image_max_val_ = 10000;
 
   ros::Timer update_config_timer_;
-  
+
   ThreadPool thread_pool_;
 };
 
