@@ -47,7 +47,7 @@
 #include "utils/curl_client.hpp"
 #include "utils/thread_pool.hpp"
 
-#define ENABLE_PROFILING
+// #define ENABLE_PROFILING
 
 constexpr size_t DEFAULT_MIN_QOS_DEPTH = 1;
 constexpr size_t DEFAULT_MAX_QOS_DEPTH = 100;  // Increase QoS depth for high frame rate
@@ -55,12 +55,24 @@ constexpr size_t DEFAULT_MAX_QOS_DEPTH = 100;  // Increase QoS depth for high fr
 using Image = sensor_msgs::msg::Image;
 using CompressedImage = sensor_msgs::msg::CompressedImage;
 
-class CoEncoder : public rclcpp::Node
-{
+struct FrameRateInfo {
+  int64_t last_timestamp;
+  int32_t output_framerate;
+  int32_t output_interval;
+  double current_fps;
+  int64_t frame_count;  // Total frames received
+  int64_t output_count; // Frames actually output
+
+  FrameRateInfo(
+    const int64_t & timestamp, const int32_t & framerate, const int32_t interval, const double fps)
+    : last_timestamp(timestamp), output_framerate(framerate), output_interval(interval),
+      current_fps(fps), frame_count(0), output_count(0) {}
+};
+
+class CoEncoder : public rclcpp::Node {
 public:
   explicit CoEncoder(const std::string & config_path)
-  : Node("coencoder"), thread_pool_(1)
-  {
+    : Node("coencoder"), thread_pool_(1) {
     RCLCPP_INFO(this->get_logger(), "CoEncoder constructor started");
 
     if (config_path.empty()) {
@@ -153,7 +165,7 @@ public:
     encoder_ctrl_ = this->create_service<std_srvs::srv::SetBool>(
       "/encoder_ctrl",
       [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
-      std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
+             std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
         COLOG_INFO("encoder_ctrl was called");
         encoding_enabled_ = request->data;
         response->success = true;
@@ -169,8 +181,7 @@ public:
     RCLCPP_INFO(this->get_logger(), "CoEncoder constructor completed successfully");
   }
 
-  ~CoEncoder() override
-  {
+  ~CoEncoder() override {
     shutdown_requested_ = true;
     if (config_update_thread_.joinable()) {
       config_update_thread_.join();
@@ -186,15 +197,13 @@ public:
   }
 
 private:
-  void update_config_from_http()
-  {
+  void update_config_from_http() {
     auto resp = curl_client_.get("http://127.0.0.1:22524/config/current");
     if (resp.success) {
       try {
         const nlohmann::json response_json = nlohmann::json::parse(resp.body);
         if (!response_json.contains("plugin_config") ||
-          !response_json["plugin_config"].contains("coEncoder"))
-        {
+          !response_json["plugin_config"].contains("coEncoder")) {
           return;
         }
         const nlohmann::json encoder_config = response_json["plugin_config"]["coEncoder"];
@@ -213,8 +222,7 @@ private:
     }
   }
 
-  void update(const Config & cfg)
-  {
+  void update(const Config & cfg) {
     encoding_enabled_ = cfg.enable_by_default_;
     Logger::getInstance().set_log_dir(cfg.log_directory_);
     Logger::getInstance().set_log_level(cfg.log_level_);
@@ -241,8 +249,7 @@ private:
     }
   }
 
-  void removing_topic(const TopicParam & topic)
-  {
+  void removing_topic(const TopicParam & topic) {
     COLOG_DEBUG("removing topic [ %s ] from subscription list", topic.output_topic.c_str());
     publisher_map_.erase(topic.output_topic);
 
@@ -257,8 +264,7 @@ private:
     }
   }
 
-  void subscribe_topic(const TopicParam & topic)
-  {
+  void subscribe_topic(const TopicParam & topic) {
     COLOG_DEBUG("try to subscribe topic [ %s ]", topic.input_topic.c_str());
     auto topic_names_and_types = this->get_topic_names_and_types();
     if (topic_names_and_types.empty()) {
@@ -283,14 +289,21 @@ private:
               ++frame_count_[topic.output_topic];
 #endif
               if (encoder_map_.count(topic.output_topic) == 0) {
-                COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
                 try {
+                  COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
                   encoder_map_.emplace(
                     std::piecewise_construct,
                     std::forward_as_tuple(topic.output_topic),
                     std::forward_as_tuple(
                       msg->width, msg->height, topic.bitrate, topic.encoder_name));
                   COLOG_DEBUG("encoder [%s] created successfully", topic.output_topic.c_str());
+
+                  frame_rate_info_.emplace(
+                    std::piecewise_construct,
+                    std::forward_as_tuple(topic.output_topic),
+                    std::forward_as_tuple(0, topic.output_frame_rate,
+                      topic.output_frame_rate == 0 ? 0 : 1000 / topic.output_frame_rate,
+                      0.0));
                 } catch (const std::exception & e) {
                   COLOG_ERROR(
                     "Failed to create encoder [%s]: %s", topic.output_topic.c_str(),
@@ -300,13 +313,25 @@ private:
               }
 
               auto cv_img = convertToCvMat(*msg);
-              auto timestamp = msg->header.stamp.sec * 1000 + msg->header.stamp.nanosec / 1000000;
+              auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000
+                + msg->header.stamp.nanosec / 1000000;
               thread_pool_.enqueue(
                 [this, cv_img, topic, timestamp]() {
                   try {
                     const auto encoder_it = encoder_map_.find(topic.output_topic);
                     if (encoder_it == encoder_map_.end()) {
                       COLOG_WARN("Encoder not found for topic: %s", topic.output_topic.c_str());
+                      return;
+                    }
+
+                    const auto frame_rate_info_it = frame_rate_info_.find(topic.output_topic);
+                    if (frame_rate_info_it == frame_rate_info_.end()) {
+                      COLOG_WARN("frame rate info not found for topic: %s",
+                                 topic.output_topic.c_str());
+                      return;
+                    }
+
+                    if (!resample_fps(frame_rate_info_it->second, timestamp)) {
                       return;
                     }
 
@@ -367,14 +392,30 @@ private:
                 return;
               }
               if (encoder_map_.count(topic.output_topic) == 0) {
-                COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
-                encoder_map_.emplace(
-                  std::piecewise_construct,
-                  std::forward_as_tuple(topic.output_topic),
-                  std::forward_as_tuple(
-                    decoded_img.cols, decoded_img.rows, topic.bitrate, topic.encoder_name));
+                try {
+                  COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
+                  encoder_map_.emplace(
+                    std::piecewise_construct,
+                    std::forward_as_tuple(topic.output_topic),
+                    std::forward_as_tuple(
+                      decoded_img.cols, decoded_img.rows, topic.bitrate, topic.encoder_name));
+                  COLOG_DEBUG("encoder [%s] created successfully", topic.output_topic.c_str());
+
+                  frame_rate_info_.emplace(
+                    std::piecewise_construct,
+                    std::forward_as_tuple(topic.output_topic),
+                    std::forward_as_tuple(0, topic.output_frame_rate,
+                      topic.output_frame_rate == 0 ? 0 : 1000 / topic.output_frame_rate,
+                      0.0));
+                } catch (const std::exception & e) {
+                  COLOG_ERROR(
+                    "Failed to create encoder [%s]: %s", topic.output_topic.c_str(),
+                    e.what());
+                  return;
+                }
               }
-              auto timestamp = msg->header.stamp.sec * 1000 + msg->header.stamp.nanosec / 1000000;
+              auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000
+                + msg->header.stamp.nanosec / 1000000;
               const auto start = std::chrono::high_resolution_clock::now();
               thread_pool_.enqueue(
                 [this, decoded_img, topic, timestamp]() {
@@ -382,6 +423,17 @@ private:
                     const auto encoder_it = encoder_map_.find(topic.output_topic);
                     if (encoder_it == encoder_map_.end()) {
                       COLOG_WARN("Encoder not found for topic: %s", topic.output_topic.c_str());
+                      return;
+                    }
+
+                    const auto frame_rate_info_it = frame_rate_info_.find(topic.output_topic);
+                    if (frame_rate_info_it == frame_rate_info_.end()) {
+                      COLOG_WARN("frame rate info not found for topic: %s",
+                                 topic.output_topic.c_str());
+                      return;
+                    }
+
+                    if (!resample_fps(frame_rate_info_it->second, timestamp)) {
                       return;
                     }
 
@@ -432,8 +484,7 @@ private:
     }
   }
 
-  static cv::Mat convertToCvMat(const Image & img_msg)
-  {
+  static cv::Mat convertToCvMat(const Image & img_msg) {
     int cv_type = CV_8UC3;
     std::string encoding = img_msg.encoding;
     if (encoding == "bgr8" || encoding == "rgb8") {
@@ -449,14 +500,53 @@ private:
     }
 
     const cv::Mat temp_image(img_msg.height, img_msg.width, cv_type,
-      const_cast<uchar *>(img_msg.data.data()),
-      img_msg.step);
+                             const_cast<uchar *>(img_msg.data.data()),
+                             img_msg.step);
 
     return temp_image.clone();
   }
 
-  bool get_publisher_qos(const std::string & topic, rclcpp::QoS & qos)
-  {
+  static bool resample_fps(FrameRateInfo & fri, const int64_t & timestamp) {
+    if (fri.output_framerate == 0) {
+      return true;
+    }
+
+    fri.frame_count++;
+    
+    if (fri.last_timestamp == 0) {
+      fri.last_timestamp = timestamp;
+      fri.current_fps = static_cast<double>(fri.output_framerate);
+      fri.output_count = 1;
+      return true;
+    }
+
+    const int64_t time_diff = timestamp - fri.last_timestamp;
+    if (time_diff <= 0) {
+      return false;
+    }
+
+    const double target_interval_ms = 1000.0 / static_cast<double>(fri.output_framerate);
+    const double actual_interval_ms = static_cast<double>(time_diff);
+    
+    const double skip_ratio = actual_interval_ms / target_interval_ms;
+    
+    if (skip_ratio < 1.0) {
+      const int64_t skip_every = static_cast<int64_t>(1.0 / skip_ratio + 0.5);
+      if (fri.frame_count % skip_every == 0) {
+        fri.last_timestamp = timestamp;
+        fri.output_count++;
+        return true;
+      } else {
+        return false;
+      }
+    } else {
+      fri.last_timestamp = timestamp;
+      fri.output_count++;
+      return true;
+    }
+  }
+
+  bool get_publisher_qos(const std::string & topic, rclcpp::QoS & qos) {
     // Select an appropriate subscription QOS profile. This is similar to how ros2 topic echo
     // does it:
     // https://github.com/ros2/ros2cli/blob/619b3d1c9/ros2topic/ros2topic/verb/echo.py#L137-L194
@@ -542,8 +632,7 @@ private:
     return true;
   }
 
-  static std::string format_topics(const std::vector<std::string> & topics)
-  {
+  static std::string format_topics(const std::vector<std::string> & topics) {
     std::string result;
     for (const auto & topic : topics) {
       result += "'" + topic + "' ";
@@ -552,8 +641,7 @@ private:
   }
 
 #ifdef ENABLE_PROFILING
-  void print_performance_stats()
-  {
+  void print_performance_stats() {
     COLOG_DEBUG(
       "┌────────────────────────────────────────"
       " Performance Statistics "
@@ -601,6 +689,7 @@ private:
   std::map<std::string, std::shared_ptr<rclcpp::Subscription<CompressedImage>>> comp_image_sub_;
   std::map<std::string, std::shared_ptr<rclcpp::Publisher<CompressedVideo>>> publisher_map_;
   std::map<std::string, H264Encoder> encoder_map_;
+  std::map<std::string, FrameRateInfo> frame_rate_info_;
 
 #ifdef ENABLE_PROFILING
   std::map<std::string, std::atomic<uint64_t>> frame_count_;
@@ -615,6 +704,7 @@ private:
 
   int depth_image_max_val_ = 10000;
   ThreadPool thread_pool_;
+  std::atomic<size_t> thread_pool_target_size_{0};
 };
 
 #endif  // ROS2__COENCODER_HPP_

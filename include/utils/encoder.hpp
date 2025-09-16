@@ -72,9 +72,11 @@ public:
     codec_context_->width = width;
     codec_context_->height = height;
 
-    codec_context_->bit_rate = bitrate_;
-    codec_context_->rc_max_rate = bitrate_;
-    codec_context_->rc_min_rate = bitrate_;
+    // codec_context_->bit_rate = bitrate_;
+    // codec_context_->rc_max_rate = bitrate_;
+    // codec_context_->rc_min_rate = bitrate_;
+    // codec_context_->rc_buffer_size = bitrate_;
+    // codec_context_->rc_initial_buffer_occupancy = bitrate_ / 2;  // Initial buffer occupancy 
 
     codec_context_->time_base = (AVRational) {1, 1000};
     codec_context_->gop_size = 30;
@@ -111,19 +113,13 @@ public:
       av_dict_set(&codecOpts, "profile", "baseline", 0);
       av_dict_set(&codecOpts, "rc_mode", "CBR", 0);
     } else {
-      av_dict_set(&codecOpts, "tune", "zerolatency", 0);
       av_dict_set(&codecOpts, "preset", "ultrafast", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
-      av_dict_set(&codecOpts, "level", "4", 0);
-      av_dict_set(&codecOpts, "refs", "1", 0);
-      av_dict_set(&codecOpts, "me_method", "dia", 0);
-      av_dict_set(&codecOpts, "subq", "1", 0);
-      av_dict_set(&codecOpts, "trellis", "0", 0);
-      av_dict_set(&codecOpts, "aq-mode", "0", 0);
-      av_dict_set(&codecOpts, "me_range", "8", 0);
-      av_dict_set(&codecOpts, "weightb", "0", 0);
-      av_dict_set(&codecOpts, "8x8dct", "0", 0);
-      av_dict_set(&codecOpts, "fast-pskip", "1", 0);
+      av_dict_set(&codecOpts, "rc", "cbr", 0);  // Constant bitrate
+      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);  // Explicit bitrate
+      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "minrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "bufsize", std::to_string(bitrate_ / 4).c_str(), 0);
     }
 
     if (avcodec_open2(codec_context_, codec_, &codecOpts) < 0) {
@@ -262,13 +258,16 @@ public:
       video_msg.format = "h264";
 
 #ifdef ROS_VERSION_1
-      video_msg.timestamp = ros::Time(pkt.pts / 1e9);
+      video_msg.timestamp = ros::Time(pkt.pts / 1e3);
 #else
-      video_msg.timestamp = rclcpp::Time(pkt.pts);
+      video_msg.timestamp = rclcpp::Time(pkt.pts * 1000000);
 #endif
 
       av_packet_unref(&pkt);
       return std::make_shared<CompressedVideo>(video_msg);
+    } else {
+      // Always unref the packet, even on failure, to prevent memory leak
+      av_packet_unref(&pkt);
     }
     return nullptr;
   }

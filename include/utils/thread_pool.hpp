@@ -49,6 +49,7 @@ public:
     } else {
       stop_ = true;
       condition_.notify_all();
+      lock.unlock(); // Release lock to allow workers to check stop_ flag
 
       for (std::thread & worker : workers_) {
         if (worker.joinable()) {
@@ -76,7 +77,7 @@ public:
       }
       tasks_.emplace([task]() {(*task)();});
     }
-    condition_.notify_one();      // Use notify_one to reduce wake-up overhead
+    condition_.notify_one();
     return res;
   }
 

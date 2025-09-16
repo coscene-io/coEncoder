@@ -32,15 +32,17 @@ struct TopicParam
   std::string input_topic;
   std::string output_topic;
   std::string encoder_name;
+  int32_t output_frame_rate;
 
   TopicParam(
-    const int64_t bitrate, const std::string & input_topic,
-    const std::string & output_topic, const std::string & encoder_name)
+    const int64_t bitrate, const std::string & input_topic, const std::string & output_topic,
+    const std::string & encoder_name, const int32_t output_frame_rate)
   {
     this->bitrate = bitrate;
     this->input_topic = input_topic;
     this->output_topic = output_topic;
     this->encoder_name = encoder_name;
+    this->output_frame_rate = output_frame_rate;
   }
 
   bool operator==(const TopicParam & other) const
@@ -48,7 +50,8 @@ struct TopicParam
     return bitrate == other.bitrate &&
            input_topic == other.input_topic &&
            output_topic == other.output_topic &&
-           encoder_name == other.encoder_name;
+           encoder_name == other.encoder_name &&
+           output_frame_rate == other.output_frame_rate;
   }
 
   bool operator<(const TopicParam & other) const
@@ -62,6 +65,9 @@ struct TopicParam
     if (output_topic != other.output_topic) {
       return output_topic < other.output_topic;
     }
+    if (output_frame_rate != other.output_frame_rate) {
+      return output_frame_rate < other.output_frame_rate;
+    }
     return encoder_name < other.encoder_name;
   }
 };
@@ -72,7 +78,6 @@ public:
   Config()
   {
     current_config_["enable_by_default"] = true;
-    current_config_["encoder_name"] = "libx264";
     current_config_["log_directory"] = "/tmp/coencoder/log/";
     current_config_["log_level"] = "Debug";
     current_config_["topics_param"] = nlohmann::json::array();
@@ -180,13 +185,16 @@ private:
     for (const auto & param : current_config_["topics_param"]) {
       const std::string encoder_name = param.contains("encoder_name") ?
         param["encoder_name"].get<std::string>() : "libx264";
+      const int32_t output_frame_rate = param.contains("output_frame_rate") ?
+        param["output_frame_rate"].get<int32_t>() : 0;
       topics_param.emplace(
         std::move(
           TopicParam(
             param["bitrate"].get<int64_t>(),
             param["input"].get<std::string>(),
             param["output"].get<std::string>(),
-            encoder_name
+            encoder_name,
+            output_frame_rate
           )
         )
       );
