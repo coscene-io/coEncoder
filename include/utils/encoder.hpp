@@ -76,7 +76,7 @@ public:
     // codec_context_->rc_max_rate = bitrate_;
     // codec_context_->rc_min_rate = bitrate_;
     // codec_context_->rc_buffer_size = bitrate_;
-    // codec_context_->rc_initial_buffer_occupancy = bitrate_ / 2;  // Initial buffer occupancy 
+    // codec_context_->rc_initial_buffer_occupancy = bitrate_ / 2;
 
     codec_context_->time_base = (AVRational) {1, 1000};
     codec_context_->gop_size = 30;

@@ -49,7 +49,7 @@ public:
     } else {
       stop_ = true;
       condition_.notify_all();
-      lock.unlock(); // Release lock to allow workers to check stop_ flag
+      lock.unlock();
 
       for (std::thread & worker : workers_) {
         if (worker.joinable()) {

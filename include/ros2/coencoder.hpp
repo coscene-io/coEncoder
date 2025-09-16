@@ -55,24 +55,27 @@ constexpr size_t DEFAULT_MAX_QOS_DEPTH = 100;  // Increase QoS depth for high fr
 using Image = sensor_msgs::msg::Image;
 using CompressedImage = sensor_msgs::msg::CompressedImage;
 
-struct FrameRateInfo {
+struct FrameRateInfo
+{
   int64_t last_timestamp;
   int32_t output_framerate;
   int32_t output_interval;
   double current_fps;
-  int64_t frame_count;  // Total frames received
-  int64_t output_count; // Frames actually output
+  int64_t frame_count;
+  int64_t output_count;
 
   FrameRateInfo(
     const int64_t & timestamp, const int32_t & framerate, const int32_t interval, const double fps)
-    : last_timestamp(timestamp), output_framerate(framerate), output_interval(interval),
-      current_fps(fps), frame_count(0), output_count(0) {}
+  : last_timestamp(timestamp), output_framerate(framerate), output_interval(interval),
+    current_fps(fps), frame_count(0), output_count(0) {}
 };
 
-class CoEncoder : public rclcpp::Node {
+class CoEncoder : public rclcpp::Node
+{
 public:
   explicit CoEncoder(const std::string & config_path)
-    : Node("coencoder"), thread_pool_(1) {
+  : Node("coencoder"), thread_pool_(1)
+  {
     RCLCPP_INFO(this->get_logger(), "CoEncoder constructor started");
 
     if (config_path.empty()) {
@@ -165,7 +168,7 @@ public:
     encoder_ctrl_ = this->create_service<std_srvs::srv::SetBool>(
       "/encoder_ctrl",
       [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
-             std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
+      std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
         COLOG_INFO("encoder_ctrl was called");
         encoding_enabled_ = request->data;
         response->success = true;
@@ -181,7 +184,8 @@ public:
     RCLCPP_INFO(this->get_logger(), "CoEncoder constructor completed successfully");
   }
 
-  ~CoEncoder() override {
+  ~CoEncoder() override
+  {
     shutdown_requested_ = true;
     if (config_update_thread_.joinable()) {
       config_update_thread_.join();
@@ -197,13 +201,15 @@ public:
   }
 
 private:
-  void update_config_from_http() {
+  void update_config_from_http()
+  {
     auto resp = curl_client_.get("http://127.0.0.1:22524/config/current");
     if (resp.success) {
       try {
         const nlohmann::json response_json = nlohmann::json::parse(resp.body);
         if (!response_json.contains("plugin_config") ||
-          !response_json["plugin_config"].contains("coEncoder")) {
+          !response_json["plugin_config"].contains("coEncoder"))
+        {
           return;
         }
         const nlohmann::json encoder_config = response_json["plugin_config"]["coEncoder"];
@@ -222,7 +228,8 @@ private:
     }
   }
 
-  void update(const Config & cfg) {
+  void update(const Config & cfg)
+  {
     encoding_enabled_ = cfg.enable_by_default_;
     Logger::getInstance().set_log_dir(cfg.log_directory_);
     Logger::getInstance().set_log_level(cfg.log_level_);
@@ -249,7 +256,8 @@ private:
     }
   }
 
-  void removing_topic(const TopicParam & topic) {
+  void removing_topic(const TopicParam & topic)
+  {
     COLOG_DEBUG("removing topic [ %s ] from subscription list", topic.output_topic.c_str());
     publisher_map_.erase(topic.output_topic);
 
@@ -264,7 +272,8 @@ private:
     }
   }
 
-  void subscribe_topic(const TopicParam & topic) {
+  void subscribe_topic(const TopicParam & topic)
+  {
     COLOG_DEBUG("try to subscribe topic [ %s ]", topic.input_topic.c_str());
     auto topic_names_and_types = this->get_topic_names_and_types();
     if (topic_names_and_types.empty()) {
@@ -301,7 +310,8 @@ private:
                   frame_rate_info_.emplace(
                     std::piecewise_construct,
                     std::forward_as_tuple(topic.output_topic),
-                    std::forward_as_tuple(0, topic.output_frame_rate,
+                    std::forward_as_tuple(
+                      0, topic.output_frame_rate,
                       topic.output_frame_rate == 0 ? 0 : 1000 / topic.output_frame_rate,
                       0.0));
                 } catch (const std::exception & e) {
@@ -313,8 +323,8 @@ private:
               }
 
               auto cv_img = convertToCvMat(*msg);
-              auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000
-                + msg->header.stamp.nanosec / 1000000;
+              auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000 +
+              msg->header.stamp.nanosec / 1000000;
               thread_pool_.enqueue(
                 [this, cv_img, topic, timestamp]() {
                   try {
@@ -326,8 +336,9 @@ private:
 
                     const auto frame_rate_info_it = frame_rate_info_.find(topic.output_topic);
                     if (frame_rate_info_it == frame_rate_info_.end()) {
-                      COLOG_WARN("frame rate info not found for topic: %s",
-                                 topic.output_topic.c_str());
+                      COLOG_WARN(
+                        "frame rate info not found for topic: %s",
+                        topic.output_topic.c_str());
                       return;
                     }
 
@@ -404,7 +415,8 @@ private:
                   frame_rate_info_.emplace(
                     std::piecewise_construct,
                     std::forward_as_tuple(topic.output_topic),
-                    std::forward_as_tuple(0, topic.output_frame_rate,
+                    std::forward_as_tuple(
+                      0, topic.output_frame_rate,
                       topic.output_frame_rate == 0 ? 0 : 1000 / topic.output_frame_rate,
                       0.0));
                 } catch (const std::exception & e) {
@@ -414,8 +426,8 @@ private:
                   return;
                 }
               }
-              auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000
-                + msg->header.stamp.nanosec / 1000000;
+              auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000 +
+              msg->header.stamp.nanosec / 1000000;
               const auto start = std::chrono::high_resolution_clock::now();
               thread_pool_.enqueue(
                 [this, decoded_img, topic, timestamp]() {
@@ -428,8 +440,9 @@ private:
 
                     const auto frame_rate_info_it = frame_rate_info_.find(topic.output_topic);
                     if (frame_rate_info_it == frame_rate_info_.end()) {
-                      COLOG_WARN("frame rate info not found for topic: %s",
-                                 topic.output_topic.c_str());
+                      COLOG_WARN(
+                        "frame rate info not found for topic: %s",
+                        topic.output_topic.c_str());
                       return;
                     }
 
@@ -484,7 +497,8 @@ private:
     }
   }
 
-  static cv::Mat convertToCvMat(const Image & img_msg) {
+  static cv::Mat convertToCvMat(const Image & img_msg)
+  {
     int cv_type = CV_8UC3;
     std::string encoding = img_msg.encoding;
     if (encoding == "bgr8" || encoding == "rgb8") {
@@ -500,19 +514,19 @@ private:
     }
 
     const cv::Mat temp_image(img_msg.height, img_msg.width, cv_type,
-                             const_cast<uchar *>(img_msg.data.data()),
-                             img_msg.step);
+      const_cast<uchar *>(img_msg.data.data()),
+      img_msg.step);
 
     return temp_image.clone();
   }
 
-  static bool resample_fps(FrameRateInfo & fri, const int64_t & timestamp) {
+  static bool resample_fps(FrameRateInfo & fri, const int64_t & timestamp)
+  {
     if (fri.output_framerate == 0) {
       return true;
     }
 
     fri.frame_count++;
-    
     if (fri.last_timestamp == 0) {
       fri.last_timestamp = timestamp;
       fri.current_fps = static_cast<double>(fri.output_framerate);
@@ -527,9 +541,7 @@ private:
 
     const double target_interval_ms = 1000.0 / static_cast<double>(fri.output_framerate);
     const double actual_interval_ms = static_cast<double>(time_diff);
-    
     const double skip_ratio = actual_interval_ms / target_interval_ms;
-    
     if (skip_ratio < 1.0) {
       const int64_t skip_every = static_cast<int64_t>(1.0 / skip_ratio + 0.5);
       if (fri.frame_count % skip_every == 0) {
@@ -546,7 +558,8 @@ private:
     }
   }
 
-  bool get_publisher_qos(const std::string & topic, rclcpp::QoS & qos) {
+  bool get_publisher_qos(const std::string & topic, rclcpp::QoS & qos)
+  {
     // Select an appropriate subscription QOS profile. This is similar to how ros2 topic echo
     // does it:
     // https://github.com/ros2/ros2cli/blob/619b3d1c9/ros2topic/ros2topic/verb/echo.py#L137-L194
@@ -632,7 +645,8 @@ private:
     return true;
   }
 
-  static std::string format_topics(const std::vector<std::string> & topics) {
+  static std::string format_topics(const std::vector<std::string> & topics)
+  {
     std::string result;
     for (const auto & topic : topics) {
       result += "'" + topic + "' ";
@@ -641,7 +655,8 @@ private:
   }
 
 #ifdef ENABLE_PROFILING
-  void print_performance_stats() {
+  void print_performance_stats()
+  {
     COLOG_DEBUG(
       "┌────────────────────────────────────────"
       " Performance Statistics "
