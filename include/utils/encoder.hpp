@@ -72,11 +72,10 @@ public:
     codec_context_->width = width;
     codec_context_->height = height;
 
-    // codec_context_->bit_rate = bitrate_;
-    // codec_context_->rc_max_rate = bitrate_;
-    // codec_context_->rc_min_rate = bitrate_;
-    // codec_context_->rc_buffer_size = bitrate_;
-    // codec_context_->rc_initial_buffer_occupancy = bitrate_ / 2;
+    codec_context_->bit_rate = bitrate_;
+    codec_context_->rc_max_rate = bitrate_ * 1.5;
+    codec_context_->rc_min_rate = bitrate_ * 0.5;
+    codec_context_->rc_buffer_size = bitrate_;
 
     codec_context_->time_base = (AVRational) {1, 1000};
     codec_context_->gop_size = 30;
@@ -95,31 +94,39 @@ public:
     AVDictionary * codecOpts = nullptr;
 
     if (encoder_name_ == "h264_nvenc") {
-      av_dict_set(&codecOpts, "preset", "llhq", 0);  // Low latency high quality
-      av_dict_set(&codecOpts, "tune", "ll", 0);      // Low latency
-      av_dict_set(&codecOpts, "rc", "cbr", 0);       // Constant bitrate
+      av_dict_set(&codecOpts, "preset", "llhq", 0);
+      av_dict_set(&codecOpts, "tune", "ll", 0);
+      av_dict_set(&codecOpts, "rc", "vbr", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
+      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else if (encoder_name_ == "h264_qsv") {
       av_dict_set(&codecOpts, "preset", "veryfast", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
       av_dict_set(&codecOpts, "async_depth", "1", 0);
       av_dict_set(&codecOpts, "look_ahead", "0", 0);
-      av_dict_set(&codecOpts, "ratecontrol", "cbr", 0);
+      av_dict_set(&codecOpts, "ratecontrol", "vbr", 0);
+      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else if (encoder_name_ == "h264_amf") {
       av_dict_set(&codecOpts, "quality", "speed", 0);
-      av_dict_set(&codecOpts, "rc", "cbr", 0);
+      av_dict_set(&codecOpts, "rc", "vbr", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
+      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else if (encoder_name_ == "h264_vaapi") {
       av_dict_set(&codecOpts, "profile", "baseline", 0);
-      av_dict_set(&codecOpts, "rc_mode", "CBR", 0);
+      av_dict_set(&codecOpts, "rc_mode", "VBR", 0);
+      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else {
       av_dict_set(&codecOpts, "preset", "ultrafast", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
-      av_dict_set(&codecOpts, "rc", "cbr", 0);  // Constant bitrate
-      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);  // Explicit bitrate
-      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_).c_str(), 0);
-      av_dict_set(&codecOpts, "minrate", std::to_string(bitrate_).c_str(), 0);
-      av_dict_set(&codecOpts, "bufsize", std::to_string(bitrate_ / 4).c_str(), 0);
+      av_dict_set(&codecOpts, "rc", "abr", 0);
+      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
+      av_dict_set(&codecOpts, "minrate", std::to_string(bitrate_ * 0.5).c_str(), 0);
+      av_dict_set(&codecOpts, "bufsize", std::to_string(bitrate_).c_str(), 0);
     }
 
     if (avcodec_open2(codec_context_, codec_, &codecOpts) < 0) {
