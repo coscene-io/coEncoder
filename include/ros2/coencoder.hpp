@@ -21,6 +21,7 @@
 #include <memory>
 #include <map>
 #include <thread>
+#include <deque>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <algorithm>
@@ -57,17 +58,12 @@ using CompressedImage = sensor_msgs::msg::CompressedImage;
 
 struct FrameRateInfo
 {
-  int64_t last_timestamp;
   int32_t output_framerate;
-  int32_t output_interval;
-  double current_fps;
-  int64_t frame_count;
-  int64_t output_count;
+  std::deque<int64_t> timestamp_window;  // Time window for frequency calculation
+  static constexpr int64_t WINDOW_SIZE_MS = 2000;  // 2 seconds window
 
-  FrameRateInfo(
-    const int64_t & timestamp, const int32_t & framerate, const int32_t interval, const double fps)
-  : last_timestamp(timestamp), output_framerate(framerate), output_interval(interval),
-    current_fps(fps), frame_count(0), output_count(0) {}
+  explicit FrameRateInfo(const int32_t & framerate)
+  : output_framerate(framerate){}
 };
 
 class CoEncoder : public rclcpp::Node
@@ -310,10 +306,7 @@ private:
                   frame_rate_info_.emplace(
                     std::piecewise_construct,
                     std::forward_as_tuple(topic.output_topic),
-                    std::forward_as_tuple(
-                      0, topic.output_frame_rate,
-                      topic.output_frame_rate == 0 ? 0 : 1000 / topic.output_frame_rate,
-                      0.0));
+                    std::forward_as_tuple(topic.output_frame_rate));
                 } catch (const std::exception & e) {
                   COLOG_ERROR(
                     "Failed to create encoder [%s]: %s", topic.output_topic.c_str(),
@@ -415,10 +408,7 @@ private:
                   frame_rate_info_.emplace(
                     std::piecewise_construct,
                     std::forward_as_tuple(topic.output_topic),
-                    std::forward_as_tuple(
-                      0, topic.output_frame_rate,
-                      topic.output_frame_rate == 0 ? 0 : 1000 / topic.output_frame_rate,
-                      0.0));
+                    std::forward_as_tuple(topic.output_frame_rate));
                 } catch (const std::exception & e) {
                   COLOG_ERROR(
                     "Failed to create encoder [%s]: %s", topic.output_topic.c_str(),
@@ -522,40 +512,35 @@ private:
 
   static bool resample_fps(FrameRateInfo & fri, const int64_t & timestamp)
   {
+    // Check if we should process this frame based on output framerate limit
     if (fri.output_framerate == 0) {
       return true;
     }
 
-    fri.frame_count++;
-    if (fri.last_timestamp == 0) {
-      fri.last_timestamp = timestamp;
-      fri.current_fps = static_cast<double>(fri.output_framerate);
-      fri.output_count = 1;
-      return true;
+    // Clean old timestamps outside the window
+    while (!fri.timestamp_window.empty() && 
+           timestamp - fri.timestamp_window.front() >= FrameRateInfo::WINDOW_SIZE_MS) {
+      fri.timestamp_window.pop_front();
     }
-
-    const int64_t time_diff = timestamp - fri.last_timestamp;
-    if (time_diff <= 0) {
-      return false;
-    }
-
-    const double target_interval_ms = 1000.0 / static_cast<double>(fri.output_framerate);
-    const double actual_interval_ms = static_cast<double>(time_diff);
-    const double skip_ratio = actual_interval_ms / target_interval_ms;
-    if (skip_ratio < 1.0) {
-      const int64_t skip_every = static_cast<int64_t>(1.0 / skip_ratio + 0.5);
-      if (fri.frame_count % skip_every == 0) {
-        fri.last_timestamp = timestamp;
-        fri.output_count++;
-        return true;
-      } else {
-        return false;
+    
+    // Calculate current frequency in the window
+    float current_frequency_in_window = 0.0f;
+    if (!fri.timestamp_window.empty()) {
+      const int64_t time_span = timestamp - fri.timestamp_window.front();
+      if (time_span > 0) {
+        current_frequency_in_window = static_cast<float>(fri.timestamp_window.size()) / 
+                                      static_cast<float>(time_span) * 1000.0f;
       }
-    } else {
-      fri.last_timestamp = timestamp;
-      fri.output_count++;
+    }
+
+    // Apply framerate limit
+    if (current_frequency_in_window < static_cast<float>(fri.output_framerate)) {
+      fri.timestamp_window.push_back(timestamp);
       return true;
     }
+    
+    // Frame rate exceeded, skip this frame
+    return false;
   }
 
   bool get_publisher_qos(const std::string & topic, rclcpp::QoS & qos)
