@@ -61,7 +61,9 @@ public:
       COLOG_INFO("create encoder with [%s] failed, not found", encoder_name.c_str());
       throw std::runtime_error("encoder not found");
     }
-    COLOG_INFO("create encoder with [%s]", encoder_name.c_str());
+    COLOG_INFO(
+      "create encoder with [%s], width: %d, height: %d",
+      encoder_name.c_str(), width, height);
 
     codec_context_ = avcodec_alloc_context3(codec_);
     if (!codec_context_) {
@@ -73,13 +75,11 @@ public:
     codec_context_->height = height;
 
     codec_context_->bit_rate = bitrate_;
-    codec_context_->rc_max_rate = bitrate_;
-    codec_context_->rc_min_rate = bitrate_;
 
     codec_context_->time_base = (AVRational) {1, 1000};
-    codec_context_->framerate = (AVRational) {30, 1};
     codec_context_->gop_size = 30;
     codec_context_->max_b_frames = 0;
+    codec_context_->framerate = (AVRational) {30, 1};
 
     if (encoder_name_ == "h264_nvenc") {
       codec_context_->pix_fmt = AV_PIX_FMT_NV12;
@@ -94,24 +94,37 @@ public:
     AVDictionary * codecOpts = nullptr;
 
     if (encoder_name_ == "h264_nvenc") {
-      av_dict_set(&codecOpts, "preset", "llhq", 0);  // Low latency high quality
-      av_dict_set(&codecOpts, "tune", "ll", 0);      // Low latency
-      av_dict_set(&codecOpts, "rc", "cbr", 0);       // Constant bitrate
+      av_dict_set(&codecOpts, "preset", "llhq", 0);
+      av_dict_set(&codecOpts, "tune", "ll", 0);
+      av_dict_set(&codecOpts, "rc", "vbr", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
+      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else if (encoder_name_ == "h264_qsv") {
       av_dict_set(&codecOpts, "preset", "veryfast", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
       av_dict_set(&codecOpts, "async_depth", "1", 0);
       av_dict_set(&codecOpts, "look_ahead", "0", 0);
-      av_dict_set(&codecOpts, "ratecontrol", "cbr", 0);
+      av_dict_set(&codecOpts, "ratecontrol", "vbr", 0);
+      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else if (encoder_name_ == "h264_amf") {
       av_dict_set(&codecOpts, "quality", "speed", 0);
-      av_dict_set(&codecOpts, "rc", "cbr", 0);
+      av_dict_set(&codecOpts, "rc", "vbr", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
+      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else if (encoder_name_ == "h264_vaapi") {
       av_dict_set(&codecOpts, "profile", "baseline", 0);
-      av_dict_set(&codecOpts, "rc_mode", "CBR", 0);
+      av_dict_set(&codecOpts, "rc_mode", "VBR", 0);
+      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else {
+      // Optimize for lower CPU usage while maintaining reasonable quality
+      // av_dict_set(&codecOpts, "preset", "veryfast", 0);
+      // av_dict_set(&codecOpts, "tune", "fastdecode", 0);
+      // av_dict_set(&codecOpts, "profile", "baseline", 0);
+
       av_dict_set(&codecOpts, "tune", "zerolatency", 0);
       av_dict_set(&codecOpts, "preset", "ultrafast", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
@@ -163,59 +176,93 @@ public:
     }
   }
 
+
+  /**
+   * @brief Send a frame to the encoder for processing
+   *
+   * This function converts the input image to the required format and sends it to the H.264 encoder.
+   * The encoder will process the frame and store it in its internal buffer.
+   *
+   * @param img Input image in OpenCV Mat format (BGR, RGB, or grayscale)
+   * @param timestamp Frame timestamp in MILISECONDS (used for PTS calculation)
+   *
+   */
   void send_frame(const cv::Mat & img, const int64_t & timestamp)
   {
-    received_ = true;
-    std::lock_guard<std::mutex> lock(mutex_);
-    cv::Mat yuv_img;
+    try {
+      received_ = true;
+      std::lock_guard<std::mutex> lock(mutex_);
 
-    if (img.channels() == 1) {
-      cv::Mat bgr_img;
-      cv::cvtColor(img, bgr_img, cv::COLOR_GRAY2BGR);
-      cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
-    } else if (img.channels() == 3) {
-      cv::cvtColor(img, yuv_img, cv::COLOR_BGR2YUV_I420);
-    } else if (img.channels() == 4) {
-      cv::Mat bgr_img;
-      cv::cvtColor(img, bgr_img, cv::COLOR_BGRA2BGR);
-      cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
-    } else {
-      COLOG_ERROR("Unsupported image channels: %d", img.channels());
-      return;
-    }
+      cv::Mat yuv_img;
 
-    if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
-      const int y_size = codec_context_->width * codec_context_->height;
-      const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
-
-      memcpy(frame_->data[0], yuv_img.data, y_size);
-
-      const uint8_t * u_src = yuv_img.data + y_size;
-      const uint8_t * v_src = yuv_img.data + y_size + uv_size;
-      uint8_t * uv_dst = frame_->data[1];
-
-      for (int i = 0; i < uv_size; i++) {
-        uv_dst[i * 2] = u_src[i];
-        uv_dst[i * 2 + 1] = v_src[i];
+      // Optimize color space conversion to reduce CPU usage
+      if (img.channels() == 1) {
+        cv::Mat bgr_img;
+        cv::cvtColor(img, bgr_img, cv::COLOR_GRAY2BGR);
+        cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
+      } else if (img.channels() == 3) {
+        // Direct BGR to YUV conversion
+        cv::cvtColor(img, yuv_img, cv::COLOR_BGR2YUV_I420);
+      } else if (img.channels() == 4) {
+        // Direct BGRA to YUV conversion (skip BGR intermediate step)
+        cv::cvtColor(img, yuv_img, cv::COLOR_BGRA2YUV_I420);
+      } else {
+        COLOG_ERROR("Unsupported image channels: %d", img.channels());
+        return;
       }
-    } else {
-      int y_size = codec_context_->width * codec_context_->height;
-      int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 
-      memcpy(frame_->data[0], yuv_img.data, y_size);
-      memcpy(frame_->data[1], yuv_img.data + y_size, uv_size);
-      memcpy(frame_->data[2], yuv_img.data + y_size + uv_size, uv_size);
-    }
+      // Optimize memory copy operations
+      const int y_size = codec_context_->width * codec_context_->height;
+      if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
+        const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 
-    frame_->pts = timestamp;
-    const int ret = avcodec_send_frame(codec_context_, frame_);
-    if (ret < 0) {
-      char err_buf[128];
-      av_strerror(ret, err_buf, sizeof(err_buf));
-      COLOG_WARN("send frame to encoder failed: %s", err_buf);
+        // Fast Y plane copy
+        memcpy(frame_->data[0], yuv_img.data, y_size);
+
+        // Optimized UV interleaving
+        const uint8_t * u_src = yuv_img.data + y_size;
+        const uint8_t * v_src = yuv_img.data + y_size + uv_size;
+        uint8_t * uv_dst = frame_->data[1];
+
+        // Unroll loop for better performance
+        for (int i = 0; i < uv_size; i++) {
+          uv_dst[i * 2] = u_src[i];
+          uv_dst[i * 2 + 1] = v_src[i];
+        }
+      } else {
+        // Standard YUV420P format - batch copy
+        const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
+
+        memcpy(frame_->data[0], yuv_img.data, y_size);
+        memcpy(frame_->data[1], yuv_img.data + y_size, uv_size);
+        memcpy(frame_->data[2], yuv_img.data + y_size + uv_size, uv_size);
+      }
+
+      frame_->pts = timestamp;
+
+      const int ret = avcodec_send_frame(codec_context_, frame_);
+      if (ret < 0) {
+        char err_buf[128];
+        av_strerror(ret, err_buf, sizeof(err_buf));
+        COLOG_WARN("send frame to encoder failed: %s", err_buf);
+      }
+    } catch (const std::exception & e) {
+      COLOG_ERROR("Exception in send_frame: %s", e.what());
+      throw;
+    } catch (...) {
+      COLOG_ERROR("Unknown exception in send_frame");
+      throw;
     }
   }
 
+  /**
+   * @brief Retrieve an encoded frame from the encoder
+   *
+   * This function attempts to get an encoded H.264 frame from the encoder's output buffer.
+   * The encoder processes frames asynchronously, so this function may not always return a frame.
+   *
+   * @return std::shared_ptr<CompressedVideo> Encoded video frame, or nullptr if no frame is available
+   */
   CompressedVideoPtr encode_frame()
   {
     if (!received_) {
@@ -234,13 +281,16 @@ public:
       video_msg.format = "h264";
 
 #ifdef ROS_VERSION_1
-      video_msg.timestamp = ros::Time(pkt.pts / 1e9);
+      video_msg.timestamp = ros::Time(pkt.pts / 1e3);
 #else
-      video_msg.timestamp = rclcpp::Time(pkt.pts);
+      video_msg.timestamp = rclcpp::Time(pkt.pts * 1000000);
 #endif
 
       av_packet_unref(&pkt);
       return std::make_shared<CompressedVideo>(video_msg);
+    } else {
+      // Always unref the packet, even on failure, to prevent memory leak
+      av_packet_unref(&pkt);
     }
     return nullptr;
   }

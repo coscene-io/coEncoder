@@ -41,12 +41,13 @@
 #include "utils/curl_client.hpp"
 #include "utils/logger.hpp"
 #include "utils/config.hpp"
+#include "utils/thread_pool.hpp"
 
 class CoEncoder
 {
 public:
   explicit CoEncoder(const std::string & config_file)
-  : nh_("~")
+  : nh_("~"), thread_pool_(1)
   {
     const char * home = std::getenv("HOME");
     if (config_file.empty()) {
@@ -63,6 +64,15 @@ public:
     }
     create_directory(config_file_path_);
     config_.load_config(config_file_path_);
+
+    size_t initial_thread_count = config_.topics_param.size();
+    if (initial_thread_count > 0) {
+      thread_pool_.resize(initial_thread_count);
+      COLOG_INFO(
+        "Initialized thread pool with %zu threads for %zu topics", initial_thread_count,
+        initial_thread_count);
+    }
+
     update_logger(config_.log_directory_, config_.log_level_);
 
     COLOG_INFO("============================== coEncoder started ==============================");
@@ -102,6 +112,18 @@ private:
   void update(const Config & cfg)
   {
     encoding_enabled_ = cfg.enable_by_default_;
+
+    // 动态调整线程池大小，根据配置中的topic数量
+    size_t new_thread_count = cfg.topics_param.size();
+    if (new_thread_count > 0) {
+      size_t current_thread_count = thread_pool_.get_thread_count();
+      if (current_thread_count != new_thread_count) {
+        COLOG_INFO(
+          "Resizing thread pool from %zu to %zu threads", current_thread_count,
+          new_thread_count);
+        thread_pool_.resize(new_thread_count);
+      }
+    }
 
     const auto & diff = findSetsDifference(subscribed_topics_params_, cfg.topics_param);
     if (!diff.isIdentical()) {
@@ -246,6 +268,18 @@ private:
       COLOG_WARN("Empty image received");
       return;
     }
+
+    // 提交到线程池异步处理，避免阻塞主线程
+    thread_pool_.enqueue(
+      [this, img, topic, timestamp]() {
+        process_image_single(img, topic, timestamp);
+      });
+  }
+
+  void process_image_single(
+    const cv::Mat & img, const std::string & topic,
+    const int64_t & timestamp)
+  {
     auto encoder_it = encoder_map_.find(topic);
     if (encoder_it == encoder_map_.end()) {
       COLOG_WARN("Encoder not found for topic: %s", topic.c_str());
@@ -298,6 +332,8 @@ private:
   int bitrate_ = 800000, depth_image_max_val_ = 10000;
 
   ros::Timer update_config_timer_;
+
+  ThreadPool thread_pool_;
 };
 
 #endif  // ROS1__COENCODER_HPP_
