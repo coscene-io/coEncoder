@@ -48,8 +48,6 @@
 #include "utils/curl_client.hpp"
 #include "utils/thread_pool.hpp"
 
-// #define ENABLE_PROFILING
-
 constexpr size_t DEFAULT_MIN_QOS_DEPTH = 1;
 constexpr size_t DEFAULT_MAX_QOS_DEPTH = 100;  // Increase QoS depth for high frame rate
 
@@ -70,7 +68,7 @@ class CoEncoder : public rclcpp::Node
 {
 public:
   explicit CoEncoder(const std::string & config_path)
-  : Node("coencoder"), thread_pool_(1)
+  : Node("coencoder"), thread_pool_(std::max(1u, std::thread::hardware_concurrency() / 2))
   {
     RCLCPP_INFO(this->get_logger(), "CoEncoder constructor started");
 
@@ -88,11 +86,7 @@ public:
       config_file_path_ = config_path;
     }
 
-    RCLCPP_INFO(this->get_logger(), "Config file path: %s", config_file_path_.c_str());
-    RCLCPP_INFO(this->get_logger(), "Creating directory...");
-    create_directory(config_file_path_);
-
-    RCLCPP_INFO(this->get_logger(), "Loading config...");
+    RCLCPP_INFO(this->get_logger(), "Loading config [%s] ...", config_file_path_.c_str());
     config_.load_config(config_file_path_);
 
     const size_t initial_thread_count = config_.topics_param.size();
@@ -144,23 +138,6 @@ public:
         }
       });
 
-#ifdef ENABLE_PROFILING
-    performance_monitor_thread_ = std::thread(
-      [this]() {
-        while (rclcpp::ok() && !shutdown_requested_) {
-          try {
-            print_performance_stats();
-          } catch (const std::exception & e) {
-            COLOG_ERROR("Performance monitoring failed: %s", e.what());
-          }
-          for (int i = 0; i < 10 && !shutdown_requested_; ++i) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-          }
-        }
-      });
-    last_performance_ = std::chrono::high_resolution_clock::now();
-#endif
-
     encoder_ctrl_ = this->create_service<std_srvs::srv::SetBool>(
       "/encoder_ctrl",
       [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
@@ -189,11 +166,6 @@ public:
     if (subscribe_update_thread_.joinable()) {
       subscribe_update_thread_.join();
     }
-#ifdef ENABLE_PROFILING
-    if (performance_monitor_thread_.joinable()) {
-      performance_monitor_thread_.join();
-    }
-#endif
   }
 
 private:
@@ -290,9 +262,6 @@ private:
           topic.input_topic, qos,
           [this, topic](Image::SharedPtr msg) {
             if (encoding_enabled_) {
-#ifdef ENABLE_PROFILING
-              ++frame_count_[topic.output_topic];
-#endif
               if (encoder_map_.count(topic.output_topic) == 0) {
                 try {
                   COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
@@ -345,9 +314,6 @@ private:
                       const auto pub_it = publisher_map_.find(topic.output_topic);
                       if (pub_it != publisher_map_.end()) {
                         pub_it->second->publish(*frame);
-#ifdef ENABLE_PROFILING
-                        ++processed_count_[topic.output_topic];
-#endif
                       }
                     }
                   } catch (const std::exception & e) {
@@ -364,11 +330,6 @@ private:
           });
         subscribed_topics_params_.emplace(topic);
         image_sub_.emplace(topic.output_topic, img_sub);
-
-#ifdef ENABLE_PROFILING
-        frame_count_[topic.output_topic] = 0;
-        processed_count_[topic.output_topic] = 0;
-#endif
 
         COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
         if (publisher_map_.count(topic.output_topic) == 0) {
@@ -388,9 +349,6 @@ private:
           topic.input_topic, qos,
           [this, topic](CompressedImage::SharedPtr msg) {
             if (encoding_enabled_) {
-#ifdef ENABLE_PROFILING
-              ++frame_count_[topic.output_topic];
-#endif
               const cv::Mat decoded_img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_UNCHANGED);
               if (decoded_img.empty()) {
                 return;
@@ -446,9 +404,6 @@ private:
                       const auto pub_it = publisher_map_.find(topic.output_topic);
                       if (pub_it != publisher_map_.end()) {
                         pub_it->second->publish(*frame);
-#ifdef ENABLE_PROFILING
-                        ++processed_count_[topic.output_topic];
-#endif
                       }
                     }
                   } catch (const std::exception & e) {
@@ -469,10 +424,6 @@ private:
         subscribed_topics_params_.emplace(topic);
         comp_image_sub_.emplace(topic.output_topic, comp_sub);
 
-#ifdef ENABLE_PROFILING
-        frame_count_[topic.output_topic] = 0;
-        processed_count_[topic.output_topic] = 0;
-#endif
         COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
         if (publisher_map_.count(topic.output_topic) == 0) {
           COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
@@ -490,7 +441,8 @@ private:
   static cv::Mat convertToCvMat(const Image & img_msg)
   {
     int cv_type = CV_8UC3;
-    std::string encoding = img_msg.encoding;
+    const std::string & encoding = img_msg.encoding;
+
     if (encoding == "bgr8" || encoding == "rgb8") {
       cv_type = CV_8UC3;
     } else if (encoding == "bgra8" || encoding == "rgba8") {
@@ -503,11 +455,11 @@ private:
       throw std::runtime_error("Unsupported encoding type: " + encoding);
     }
 
-    const cv::Mat temp_image(img_msg.height, img_msg.width, cv_type,
-      const_cast<uchar *>(img_msg.data.data()),
-      img_msg.step);
+    cv::Mat result(img_msg.height, img_msg.width, cv_type,
+                   const_cast<uchar *>(img_msg.data.data()),
+                   img_msg.step);
 
-    return temp_image.clone();
+    return result.clone();
   }
 
   static bool resample_fps(FrameRateInfo & fri, const int64_t & timestamp)
@@ -517,28 +469,29 @@ private:
       return true;
     }
 
-    // Clean old timestamps outside the window
-    while (!fri.timestamp_window.empty() && 
-           timestamp - fri.timestamp_window.front() >= FrameRateInfo::WINDOW_SIZE_MS) {
-      fri.timestamp_window.pop_front();
-    }
-    
-    // Calculate current frequency in the window
-    float current_frequency_in_window = 0.0f;
-    if (!fri.timestamp_window.empty()) {
-      const int64_t time_span = timestamp - fri.timestamp_window.front();
-      if (time_span > 0) {
-        current_frequency_in_window = static_cast<float>(fri.timestamp_window.size()) / 
-                                      static_cast<float>(time_span) * 1000.0f;
-      }
+    const int64_t window_threshold = timestamp - FrameRateInfo::WINDOW_SIZE_MS;
+    if (!fri.timestamp_window.empty() && fri.timestamp_window.front() < window_threshold) {
+      auto it = std::lower_bound(fri.timestamp_window.begin(), fri.timestamp_window.end(), window_threshold);
+      fri.timestamp_window.erase(fri.timestamp_window.begin(), it);
     }
 
-    // Apply framerate limit
+    if (fri.timestamp_window.empty()) {
+      fri.timestamp_window.push_back(timestamp);
+      return true;
+    }
+
+    const int64_t time_span = timestamp - fri.timestamp_window.front();
+    if (time_span <= 0) {
+      return false;
+    }
+    
+    const float current_frequency_in_window = static_cast<float>(fri.timestamp_window.size()) * 1000.0f / static_cast<float>(time_span);
+
     if (current_frequency_in_window < static_cast<float>(fri.output_framerate)) {
       fri.timestamp_window.push_back(timestamp);
       return true;
     }
-    
+
     // Frame rate exceeded, skip this frame
     return false;
   }
@@ -639,39 +592,6 @@ private:
     return result;
   }
 
-#ifdef ENABLE_PROFILING
-  void print_performance_stats()
-  {
-    COLOG_DEBUG(
-      "┌────────────────────────────────────────"
-      " Performance Statistics "
-      "───────────────────────────────────────────");
-    COLOG_DEBUG(
-      "│Thread Pool: %zu threads, %zu queued tasks",
-      thread_pool_.get_thread_count(), thread_pool_.get_queue_size());
-    const auto now = std::chrono::high_resolution_clock::now();
-    for (const auto & pair : frame_count_) {
-      const std::string & topic = pair.first;
-      const auto & frame_count = pair.second;
-      auto processed = processed_count_[topic].load();
-      const auto time_elapsed =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_performance_);
-      const auto fps = static_cast<float>(frame_count.load()) /
-        static_cast<float>(time_elapsed.count()) * 1000.0f;
-
-      COLOG_DEBUG(
-        "├─ Topic [%s]: Received=%lu, Published=%lu, Frame rate: %f from last statistics",
-        topic.c_str(), frame_count.load(), processed, fps);
-      frame_count_[topic] = 0;
-      processed_count_[topic] = 0;
-    }
-    COLOG_DEBUG(
-      "└─────────────────────────────────────────────────────"
-      "──────────────────────────────────────────────────────");
-    last_performance_ = now;
-  }
-#endif
-
   CurlClient curl_client_;
   Config config_;
 
@@ -690,13 +610,6 @@ private:
   std::map<std::string, std::shared_ptr<rclcpp::Publisher<CompressedVideo>>> publisher_map_;
   std::map<std::string, H264Encoder> encoder_map_;
   std::map<std::string, FrameRateInfo> frame_rate_info_;
-
-#ifdef ENABLE_PROFILING
-  std::map<std::string, std::atomic<uint64_t>> frame_count_;
-  std::map<std::string, std::atomic<uint64_t>> processed_count_;
-  std::thread performance_monitor_thread_;
-  std::chrono::time_point<std::chrono::high_resolution_clock> last_performance_;
-#endif
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr encoder_ctrl_;
   std::thread config_update_thread_;

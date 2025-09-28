@@ -88,8 +88,9 @@ public:
   void load_config(const std::string & config_file)
   {
     if (access(config_file.c_str(), F_OK) == -1) {
-      save_config(config_file);
       COLOG_WARN("Config file does not exist");
+      create_directory(config_file);
+      save_config(config_file);
       return;
     }
     try {

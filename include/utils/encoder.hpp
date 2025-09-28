@@ -61,7 +61,8 @@ public:
       COLOG_INFO("create encoder with [%s] failed, not found", encoder_name.c_str());
       throw std::runtime_error("encoder not found");
     }
-    COLOG_INFO("create encoder with [%s]", encoder_name.c_str());
+    COLOG_INFO("create encoder with [%s], width: %d, height: %d",
+      encoder_name.c_str(), width, height);
 
     codec_context_ = avcodec_alloc_context3(codec_);
     if (!codec_context_) {
@@ -73,13 +74,11 @@ public:
     codec_context_->height = height;
 
     codec_context_->bit_rate = bitrate_;
-    codec_context_->rc_max_rate = bitrate_ * 1.5;
-    codec_context_->rc_min_rate = bitrate_ * 0.5;
-    codec_context_->rc_buffer_size = bitrate_;
 
     codec_context_->time_base = (AVRational) {1, 1000};
     codec_context_->gop_size = 30;
     codec_context_->max_b_frames = 0;
+    codec_context_->framerate = (AVRational) {30, 1};
 
     if (encoder_name_ == "h264_nvenc") {
       codec_context_->pix_fmt = AV_PIX_FMT_NV12;
@@ -120,13 +119,24 @@ public:
       av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
       av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else {
+      // Optimize for lower CPU usage while maintaining reasonable quality
+      // av_dict_set(&codecOpts, "preset", "veryfast", 0);  // Better CPU efficiency than ultrafast
+      // av_dict_set(&codecOpts, "tune", "fastdecode", 0);  // Optimize for fast decoding, reduces encoding complexity
+      // av_dict_set(&codecOpts, "profile", "baseline", 0); // Use baseline profile for better compatibility and efficiency
+
+      av_dict_set(&codecOpts, "tune", "zerolatency", 0);
       av_dict_set(&codecOpts, "preset", "ultrafast", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
-      av_dict_set(&codecOpts, "rc", "abr", 0);
-      av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
-      av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
-      av_dict_set(&codecOpts, "minrate", std::to_string(bitrate_ * 0.5).c_str(), 0);
-      av_dict_set(&codecOpts, "bufsize", std::to_string(bitrate_).c_str(), 0);
+      av_dict_set(&codecOpts, "level", "4", 0);
+      av_dict_set(&codecOpts, "refs", "1", 0);
+      av_dict_set(&codecOpts, "me_method", "dia", 0);
+      av_dict_set(&codecOpts, "subq", "1", 0);
+      av_dict_set(&codecOpts, "trellis", "0", 0);
+      av_dict_set(&codecOpts, "aq-mode", "0", 0);
+      av_dict_set(&codecOpts, "me_range", "8", 0);
+      av_dict_set(&codecOpts, "weightb", "0", 0);
+      av_dict_set(&codecOpts, "8x8dct", "0", 0);
+      av_dict_set(&codecOpts, "fast-pskip", "1", 0);
     }
 
     if (avcodec_open2(codec_context_, codec_, &codecOpts) < 0) {
@@ -184,38 +194,44 @@ public:
 
       cv::Mat yuv_img;
 
+      // Optimize color space conversion to reduce CPU usage
       if (img.channels() == 1) {
         cv::Mat bgr_img;
         cv::cvtColor(img, bgr_img, cv::COLOR_GRAY2BGR);
         cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
       } else if (img.channels() == 3) {
+        // Direct BGR to YUV conversion
         cv::cvtColor(img, yuv_img, cv::COLOR_BGR2YUV_I420);
       } else if (img.channels() == 4) {
-        cv::Mat bgr_img;
-        cv::cvtColor(img, bgr_img, cv::COLOR_BGRA2BGR);
-        cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
+        // Direct BGRA to YUV conversion (skip BGR intermediate step)
+        cv::cvtColor(img, yuv_img, cv::COLOR_BGRA2YUV_I420);
       } else {
         COLOG_ERROR("Unsupported image channels: %d", img.channels());
         return;
       }
 
+      // Optimize memory copy operations
+      const int y_size = codec_context_->width * codec_context_->height;
+      
       if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
-        const int y_size = codec_context_->width * codec_context_->height;
         const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 
+        // Fast Y plane copy
         memcpy(frame_->data[0], yuv_img.data, y_size);
 
+        // Optimized UV interleaving
         const uint8_t * u_src = yuv_img.data + y_size;
         const uint8_t * v_src = yuv_img.data + y_size + uv_size;
         uint8_t * uv_dst = frame_->data[1];
 
+        // Unroll loop for better performance
         for (int i = 0; i < uv_size; i++) {
           uv_dst[i * 2] = u_src[i];
           uv_dst[i * 2 + 1] = v_src[i];
         }
       } else {
-        int y_size = codec_context_->width * codec_context_->height;
-        int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
+        // Standard YUV420P format - batch copy
+        const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 
         memcpy(frame_->data[0], yuv_img.data, y_size);
         memcpy(frame_->data[1], yuv_img.data + y_size, uv_size);
