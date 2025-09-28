@@ -61,7 +61,8 @@ public:
       COLOG_INFO("create encoder with [%s] failed, not found", encoder_name.c_str());
       throw std::runtime_error("encoder not found");
     }
-    COLOG_INFO("create encoder with [%s], width: %d, height: %d",
+    COLOG_INFO(
+      "create encoder with [%s], width: %d, height: %d",
       encoder_name.c_str(), width, height);
 
     codec_context_ = avcodec_alloc_context3(codec_);
@@ -120,9 +121,9 @@ public:
       av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else {
       // Optimize for lower CPU usage while maintaining reasonable quality
-      // av_dict_set(&codecOpts, "preset", "veryfast", 0);  // Better CPU efficiency than ultrafast
-      // av_dict_set(&codecOpts, "tune", "fastdecode", 0);  // Optimize for fast decoding, reduces encoding complexity
-      // av_dict_set(&codecOpts, "profile", "baseline", 0); // Use baseline profile for better compatibility and efficiency
+      // av_dict_set(&codecOpts, "preset", "veryfast", 0);
+      // av_dict_set(&codecOpts, "tune", "fastdecode", 0);
+      // av_dict_set(&codecOpts, "profile", "baseline", 0);
 
       av_dict_set(&codecOpts, "tune", "zerolatency", 0);
       av_dict_set(&codecOpts, "preset", "ultrafast", 0);
@@ -212,7 +213,6 @@ public:
 
       // Optimize memory copy operations
       const int y_size = codec_context_->width * codec_context_->height;
-      
       if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
         const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 

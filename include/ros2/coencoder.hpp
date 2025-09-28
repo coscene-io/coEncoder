@@ -61,7 +61,7 @@ struct FrameRateInfo
   static constexpr int64_t WINDOW_SIZE_MS = 2000;  // 2 seconds window
 
   explicit FrameRateInfo(const int32_t & framerate)
-  : output_framerate(framerate){}
+  : output_framerate(framerate) {}
 };
 
 class CoEncoder : public rclcpp::Node
@@ -456,8 +456,8 @@ private:
     }
 
     cv::Mat result(img_msg.height, img_msg.width, cv_type,
-                   const_cast<uchar *>(img_msg.data.data()),
-                   img_msg.step);
+      const_cast<uchar *>(img_msg.data.data()),
+      img_msg.step);
 
     return result.clone();
   }
@@ -471,7 +471,9 @@ private:
 
     const int64_t window_threshold = timestamp - FrameRateInfo::WINDOW_SIZE_MS;
     if (!fri.timestamp_window.empty() && fri.timestamp_window.front() < window_threshold) {
-      auto it = std::lower_bound(fri.timestamp_window.begin(), fri.timestamp_window.end(), window_threshold);
+      auto it = std::lower_bound(
+        fri.timestamp_window.begin(),
+        fri.timestamp_window.end(), window_threshold);
       fri.timestamp_window.erase(fri.timestamp_window.begin(), it);
     }
 
@@ -484,8 +486,9 @@ private:
     if (time_span <= 0) {
       return false;
     }
-    
-    const float current_frequency_in_window = static_cast<float>(fri.timestamp_window.size()) * 1000.0f / static_cast<float>(time_span);
+
+    const float current_frequency_in_window = static_cast<float>(fri.timestamp_window.size()) *
+      1000.0f / static_cast<float>(time_span);
 
     if (current_frequency_in_window < static_cast<float>(fri.output_framerate)) {
       fri.timestamp_window.push_back(timestamp);
