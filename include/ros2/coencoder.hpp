@@ -154,10 +154,20 @@ public:
         }
       });
 
+    // Create a timer to periodically print encoder statistics (every 10 seconds)
+    stats_timer_ = this->create_wall_timer(
+      std::chrono::seconds(10),
+      [this]() {
+        for (auto & kv : encoder_map_) {
+          kv.second.print_stats();
+        }
+        COLOG_DEBUG("---------------------------------------------------------------------------");
+      });
+
     RCLCPP_INFO(this->get_logger(), "CoEncoder constructor completed successfully");
   }
 
-  ~CoEncoder() override
+  ~CoEncoder() overrideg
   {
     shutdown_requested_ = true;
     if (config_update_thread_.joinable()) {
@@ -268,8 +278,7 @@ private:
                   encoder_map_.emplace(
                     std::piecewise_construct,
                     std::forward_as_tuple(topic.output_topic),
-                    std::forward_as_tuple(
-                      msg->width, msg->height, topic.bitrate, topic.encoder_name));
+                    std::forward_as_tuple(msg->width, msg->height, topic));
                   COLOG_DEBUG("encoder [%s] created successfully", topic.output_topic.c_str());
 
                   frame_rate_info_.emplace(
@@ -308,7 +317,31 @@ private:
                       return;
                     }
 
-                    encoder_it->second.send_frame(cv_img, timestamp);
+                    int send_ret = encoder_it->second.send_frame(cv_img, timestamp);
+
+                    if (send_ret == AVERROR(EAGAIN)) {
+                      COLOG_DEBUG("Draining encoder output buffer for topic: %s", topic.output_topic.c_str());
+                      // Keep retrieving packets until no more are available
+                      int drained_count = 0;
+                      while (true) {
+                        const auto frame = encoder_it->second.encode_frame();
+                        if (frame) {
+                          const auto pub_it = publisher_map_.find(topic.output_topic);
+                          if (pub_it != publisher_map_.end()) {
+                            pub_it->second->publish(*frame);
+                          }
+                          drained_count++;
+                        } else {
+                          break;
+                        }
+                      }
+                      COLOG_DEBUG("Drained %d packets, retrying send_frame", drained_count);
+                      send_ret = encoder_it->second.send_frame(cv_img, timestamp);
+                      if (send_ret < 0 && send_ret != AVERROR(EAGAIN)) {
+                        COLOG_WARN("send_frame failed after draining for topic: %s", topic.output_topic.c_str());
+                      }
+                    }
+
                     const auto frame = encoder_it->second.encode_frame();
                     if (frame) {
                       const auto pub_it = publisher_map_.find(topic.output_topic);
@@ -359,8 +392,7 @@ private:
                   encoder_map_.emplace(
                     std::piecewise_construct,
                     std::forward_as_tuple(topic.output_topic),
-                    std::forward_as_tuple(
-                      decoded_img.cols, decoded_img.rows, topic.bitrate, topic.encoder_name));
+                    std::forward_as_tuple(decoded_img.cols, decoded_img.rows, topic));
                   COLOG_DEBUG("encoder [%s] created successfully", topic.output_topic.c_str());
 
                   frame_rate_info_.emplace(
@@ -398,7 +430,35 @@ private:
                       return;
                     }
 
-                    encoder_it->second.send_frame(decoded_img, timestamp);
+                    // Send frame to encoder
+                    int send_ret = encoder_it->second.send_frame(decoded_img, timestamp);
+                    
+                    // If send_frame returns EAGAIN, we must drain all output packets first
+                    if (send_ret == AVERROR(EAGAIN)) {
+                      COLOG_DEBUG("Draining encoder output buffer for topic: %s", topic.output_topic.c_str());
+                      // Keep retrieving packets until no more are available
+                      int drained_count = 0;
+                      while (true) {
+                        const auto frame = encoder_it->second.encode_frame();
+                        if (frame) {
+                          const auto pub_it = publisher_map_.find(topic.output_topic);
+                          if (pub_it != publisher_map_.end()) {
+                            pub_it->second->publish(*frame);
+                          }
+                          drained_count++;
+                        } else {
+                          break;  // No more packets available
+                        }
+                      }
+                      COLOG_DEBUG("Drained %d packets, retrying send_frame", drained_count);
+                      // Retry sending the frame after draining
+                      send_ret = encoder_it->second.send_frame(decoded_img, timestamp);
+                      if (send_ret < 0 && send_ret != AVERROR(EAGAIN)) {
+                        COLOG_WARN("send_frame failed after draining for topic: %s", topic.output_topic.c_str());
+                      }
+                    }
+                    
+                    // Always try to retrieve at least one encoded frame
                     const auto frame = encoder_it->second.encode_frame();
                     if (frame) {
                       const auto pub_it = publisher_map_.find(topic.output_topic);
@@ -615,6 +675,7 @@ private:
   std::map<std::string, FrameRateInfo> frame_rate_info_;
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr encoder_ctrl_;
+  rclcpp::TimerBase::SharedPtr stats_timer_;
   std::thread config_update_thread_;
   std::thread subscribe_update_thread_;
 

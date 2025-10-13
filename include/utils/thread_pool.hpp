@@ -38,28 +38,42 @@ public:
 
   void resize(const size_t new_thread_count)
   {
-    if (new_thread_count == workers_.size()) {
+    size_t current_size;
+    {
+      std::lock_guard<std::mutex> lock(workers_mutex_);
+      current_size = workers_.size();
+    }
+    
+    if (new_thread_count == current_size) {
       return;
     }
 
-    std::unique_lock<std::mutex> lock(queue_mutex_);
-
-    if (new_thread_count > workers_.size()) {
-      create_workers(new_thread_count - workers_.size());
+    if (new_thread_count > current_size) {
+      // Increase: create new workers WITHOUT holding the lock
+      const size_t additional = new_thread_count - current_size;
+      create_workers(additional);
     } else {
-      stop_ = true;
-      condition_.notify_all();
-      lock.unlock();
-
-      for (std::thread & worker : workers_) {
-        if (worker.joinable()) {
-          worker.join();
-        }
+      // Decrease: stop all and recreate
+      {
+        std::unique_lock<std::mutex> lock(queue_mutex_);
+        stop_ = true;
       }
+      condition_.notify_all();
 
-      workers_.clear();
+      // Join all workers (read-only access, safe without lock)
+      {
+        std::lock_guard<std::mutex> lock(workers_mutex_);
+        for (std::thread & worker : workers_) {
+          if (worker.joinable()) {
+            worker.join();
+          }
+        }
+        workers_.clear();
+      }
+      
       stop_ = false;
 
+      // Create new workers
       create_workers(new_thread_count);
     }
   }
@@ -83,13 +97,13 @@ public:
 
   size_t get_thread_count() const
   {
-    std::unique_lock<std::mutex> lock(queue_mutex_);
+    std::lock_guard<std::mutex> lock(workers_mutex_);
     return workers_.size();
   }
 
   size_t get_queue_size() const
   {
-    std::unique_lock<std::mutex> lock(queue_mutex_);
+    std::lock_guard<std::mutex> lock(queue_mutex_);
     return tasks_.size();
   }
 
@@ -100,6 +114,8 @@ public:
       stop_ = true;
     }
     condition_.notify_all();
+    
+    std::lock_guard<std::mutex> lock(workers_mutex_);
     for (std::thread & worker : workers_) {
       if (worker.joinable()) {
         worker.join();
@@ -110,8 +126,11 @@ public:
 private:
   void create_workers(size_t count)
   {
+    std::vector<std::thread> new_workers;
+    new_workers.reserve(count);
+    
     for (size_t i = 0; i < count; ++i) {
-      workers_.emplace_back(
+      new_workers.emplace_back(
         [this] {
           for (;; ) {
             std::function<void()> task;
@@ -130,9 +149,18 @@ private:
           }
         });
     }
+    
+    // Add new workers to the vector with lock protection
+    {
+      std::lock_guard<std::mutex> lock(workers_mutex_);
+      workers_.insert(workers_.end(), 
+                      std::make_move_iterator(new_workers.begin()),
+                      std::make_move_iterator(new_workers.end()));
+    }
   }
 
   mutable std::mutex queue_mutex_;
+  mutable std::mutex workers_mutex_;  // Protects workers_ vector
   std::vector<std::thread> workers_;
   std::queue<std::function<void()>> tasks_;
   std::condition_variable condition_;

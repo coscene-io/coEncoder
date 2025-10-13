@@ -286,7 +286,10 @@ private:
       return;
     }
     try {
+      // Send frame to encoder
       encoder_it->second.send_frame(img, timestamp);
+      
+      // Try to retrieve encoded frame (may return nullptr if encoder needs more input)
       const auto frame = encoder_it->second.encode_frame();
       if (frame) {
         auto pub_it = publisher_map_.find(topic);
