@@ -167,7 +167,7 @@ public:
     RCLCPP_INFO(this->get_logger(), "CoEncoder constructor completed successfully");
   }
 
-  ~CoEncoder() overrideg
+  ~CoEncoder() override
   {
     shutdown_requested_ = true;
     if (config_update_thread_.joinable()) {
