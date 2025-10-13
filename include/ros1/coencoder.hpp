@@ -37,10 +37,10 @@
 
 #include "json.hpp"
 
-#include "utils/encoder.hpp"
 #include "utils/curl_client.hpp"
-#include "utils/logger.hpp"
 #include "utils/config.hpp"
+#include "utils/encoder.hpp"
+#include "utils/logger.hpp"
 #include "utils/thread_pool.hpp"
 
 class CoEncoder
@@ -179,8 +179,7 @@ private:
               encoder_map_.emplace(
                 std::piecewise_construct,
                 std::forward_as_tuple(topic.input_topic),
-                std::forward_as_tuple(
-                  msg->width, msg->height, topic.bitrate, topic.encoder_name));
+                std::forward_as_tuple(msg->width, msg->height, topic));
             }
             process_image(
               convertToCvMat(*msg), topic.input_topic,
@@ -206,8 +205,7 @@ private:
               encoder_map_.emplace(
                 std::piecewise_construct,
                 std::forward_as_tuple(topic.input_topic),
-                std::forward_as_tuple(
-                  decoded_img.cols, decoded_img.rows, topic.bitrate, topic.encoder_name));
+                std::forward_as_tuple(decoded_img.cols, decoded_img.rows, topic));
             }
             process_image(
               decoded_img, topic.input_topic,

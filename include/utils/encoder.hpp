@@ -46,8 +46,7 @@ extern "C" {
 class H264Encoder
 {
 public:
-  H264Encoder(
-    const int width, const int height, const TopicParam & param)
+  H264Encoder(const int width, const int height, const TopicParam & param)
   {
 #ifdef ROS_VERSION_1
     avcodec_register_all();
