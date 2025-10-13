@@ -43,7 +43,7 @@ public:
       std::lock_guard<std::mutex> lock(workers_mutex_);
       current_size = workers_.size();
     }
-    
+
     if (new_thread_count == current_size) {
       return;
     }
@@ -70,7 +70,7 @@ public:
         }
         workers_.clear();
       }
-      
+
       stop_ = false;
 
       // Create new workers
@@ -114,7 +114,7 @@ public:
       stop_ = true;
     }
     condition_.notify_all();
-    
+
     std::lock_guard<std::mutex> lock(workers_mutex_);
     for (std::thread & worker : workers_) {
       if (worker.joinable()) {
@@ -128,7 +128,7 @@ private:
   {
     std::vector<std::thread> new_workers;
     new_workers.reserve(count);
-    
+
     for (size_t i = 0; i < count; ++i) {
       new_workers.emplace_back(
         [this] {
@@ -149,13 +149,14 @@ private:
           }
         });
     }
-    
+
     // Add new workers to the vector with lock protection
     {
       std::lock_guard<std::mutex> lock(workers_mutex_);
-      workers_.insert(workers_.end(), 
-                      std::make_move_iterator(new_workers.begin()),
-                      std::make_move_iterator(new_workers.end()));
+      workers_.insert(
+        workers_.end(),
+        std::make_move_iterator(new_workers.begin()),
+        std::make_move_iterator(new_workers.end()));
     }
   }
 

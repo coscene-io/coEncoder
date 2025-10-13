@@ -47,7 +47,7 @@ class H264Encoder
 {
 public:
   H264Encoder(
-    const int width, const int height, const TopicParam& param)
+    const int width, const int height, const TopicParam & param)
   {
 #ifdef ROS_VERSION_1
     avcodec_register_all();
@@ -58,7 +58,8 @@ public:
     encoder_name_ = param.encoder_name;
     codec_ = avcodec_find_encoder_by_name(encoder_name_.c_str());
     if (!codec_) {
-      COLOG_INFO("create [%s] encoder with [%s] failed, not found",
+      COLOG_INFO(
+        "create [%s] encoder with [%s] failed, not found",
         encoder_topic_.c_str(), encoder_name_.c_str());
       throw std::runtime_error("encoder not found");
     }
@@ -128,11 +129,11 @@ public:
       av_dict_set(&codecOpts, "tune", param.encode_tune.c_str(), 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
       av_dict_set(&codecOpts, "level", "3.1", 0);
-      
+
       // Thread optimization for multiple encoders
       av_dict_set(&codecOpts, "threads", "2", 0);          // Limit threads per encoder
       av_dict_set(&codecOpts, "sliced-threads", "1", 0);   // Use sliced threading
-      
+
       // Frame rate guarantee settings (minimal encoding complexity)
       av_dict_set(&codecOpts, "refs", "1", 0);             // Single reference frame
       av_dict_set(&codecOpts, "me_method", "dia", 0);      // Diamond search (fastest)
@@ -143,7 +144,7 @@ public:
       av_dict_set(&codecOpts, "weightb", "0", 0);           // Disable weighted B-frames
       av_dict_set(&codecOpts, "8x8dct", "0", 0);            // Disable 8x8 DCT
       av_dict_set(&codecOpts, "fast-pskip", "1", 0);        // Enable fast P-skip
-      
+
       // Additional settings for frame rate guarantee
       av_dict_set(&codecOpts, "rc-lookahead", "0", 0);      // No lookahead for immediate encoding
       av_dict_set(&codecOpts, "no-scenecut", "1", 0);       // Disable scene cut detection
@@ -152,7 +153,7 @@ public:
       av_dict_set(&codecOpts, "direct", "none", 0);         // Disable direct mode
       av_dict_set(&codecOpts, "no-cabac", "1", 0);          // Disable CABAC for lower CPU
       av_dict_set(&codecOpts, "no-deblock", "1", 0);        // Disable deblocking filter
-      
+
       // Minimize internal buffering
       av_dict_set(&codecOpts, "sync-lookahead", "0", 0);    // Disable sync lookahead
     }
@@ -254,13 +255,15 @@ public:
       if (ret < 0) {
         if (ret == AVERROR(EAGAIN)) {
           ++send_eagain_count_;
-          COLOG_DEBUG("[%s] Encoder buffer full (EAGAIN), frame may be delayed",
+          COLOG_DEBUG(
+            "[%s] Encoder buffer full (EAGAIN), frame may be delayed",
             encoder_topic_.c_str());
           return ret;
         } else {
           char err_buf[128];
           av_strerror(ret, err_buf, sizeof(err_buf));
-          COLOG_WARN("send frame to [%s] encoder failed: %s (error code: %d)",
+          COLOG_WARN(
+            "send frame to [%s] encoder failed: %s (error code: %d)",
             encoder_topic_.c_str(), err_buf, ret);
           return ret;
         }
@@ -313,12 +316,14 @@ public:
     } else {
       if (ret == AVERROR(EAGAIN)) {
         ++recv_eagain_count_;
-        COLOG_DEBUG("[%s] encode_frame: EAGAIN - encoder needs more input before producing output",
+        COLOG_DEBUG(
+          "[%s] encode_frame: EAGAIN - encoder needs more input before producing output",
           encoder_topic_.c_str());
       } else if (ret != AVERROR_EOF) {
         char err_buf[128];
         av_strerror(ret, err_buf, sizeof(err_buf));
-        COLOG_WARN("[%s] encode_frame failed: %s (error code: %d)",
+        COLOG_WARN(
+          "[%s] encode_frame failed: %s (error code: %d)",
           encoder_topic_.c_str(), err_buf, ret);
       }
       av_packet_unref(&pkt);
@@ -326,9 +331,10 @@ public:
     return nullptr;
   }
 
-  void print_stats() const {
+  void print_stats() const
+  {
     COLOG_DEBUG(
-      "[%s] Encoder stats - Sent: %lu, Output: %lu, Send_EAGAIN: %lu, Recv_EAGAIN: %lu, Ratio: %.2f%%",
+      "[%s] stats - Sent: %lu, Output: %lu, Send_EAGAIN: %lu, Recv_EAGAIN: %lu, Ratio: %.2f%%",
       encoder_topic_.c_str(),
       frames_sent_.load(),
       packets_received_.load(),
@@ -348,7 +354,7 @@ private:
 
   std::mutex mutex_;
   std::atomic<bool> received_{false};
-  
+
   // Performance statistics
   std::atomic<uint64_t> frames_sent_{0};
   std::atomic<uint64_t> packets_received_{0};

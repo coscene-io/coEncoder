@@ -320,7 +320,9 @@ private:
                     int send_ret = encoder_it->second.send_frame(cv_img, timestamp);
 
                     if (send_ret == AVERROR(EAGAIN)) {
-                      COLOG_DEBUG("Draining encoder output buffer for topic: %s", topic.output_topic.c_str());
+                      COLOG_DEBUG(
+                        "Draining encoder output buffer for topic: %s",
+                        topic.output_topic.c_str());
                       // Keep retrieving packets until no more are available
                       int drained_count = 0;
                       while (true) {
@@ -338,7 +340,9 @@ private:
                       COLOG_DEBUG("Drained %d packets, retrying send_frame", drained_count);
                       send_ret = encoder_it->second.send_frame(cv_img, timestamp);
                       if (send_ret < 0 && send_ret != AVERROR(EAGAIN)) {
-                        COLOG_WARN("send_frame failed after draining for topic: %s", topic.output_topic.c_str());
+                        COLOG_WARN(
+                          "send_frame failed after draining for topic: %s",
+                          topic.output_topic.c_str());
                       }
                     }
 
@@ -432,10 +436,12 @@ private:
 
                     // Send frame to encoder
                     int send_ret = encoder_it->second.send_frame(decoded_img, timestamp);
-                    
+
                     // If send_frame returns EAGAIN, we must drain all output packets first
                     if (send_ret == AVERROR(EAGAIN)) {
-                      COLOG_DEBUG("Draining encoder output buffer for topic: %s", topic.output_topic.c_str());
+                      COLOG_DEBUG(
+                        "Draining encoder output buffer for topic: %s",
+                        topic.output_topic.c_str());
                       // Keep retrieving packets until no more are available
                       int drained_count = 0;
                       while (true) {
@@ -454,10 +460,12 @@ private:
                       // Retry sending the frame after draining
                       send_ret = encoder_it->second.send_frame(decoded_img, timestamp);
                       if (send_ret < 0 && send_ret != AVERROR(EAGAIN)) {
-                        COLOG_WARN("send_frame failed after draining for topic: %s", topic.output_topic.c_str());
+                        COLOG_WARN(
+                          "send_frame failed after draining for topic: %s",
+                          topic.output_topic.c_str());
                       }
                     }
-                    
+
                     // Always try to retrieve at least one encoded frame
                     const auto frame = encoder_it->second.encode_frame();
                     if (frame) {

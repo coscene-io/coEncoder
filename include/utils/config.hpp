@@ -21,7 +21,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
-
+#include <vector>
 #include "json.hpp"
 
 #include "utils/logger.hpp"
@@ -37,7 +37,8 @@ const std::vector<std::string> valid_encode_tune =
   "fastdecode", "zerolatency", "psnr", "ssim"
 };
 
-struct TopicParam {
+struct TopicParam
+{
   std::string input_topic;
   std::string output_topic;
   std::string encoder_name;
@@ -51,7 +52,8 @@ struct TopicParam {
     const int64_t bitrate, const std::string & input_topic, const std::string & output_topic,
     const std::string & encoder_name, const int32_t output_frame_rate,
     const std::string & encode_preset = "ultrafast",
-    const std::string & encode_tune = "zerolatency") {
+    const std::string & encode_tune = "zerolatency")
+  {
     this->bitrate = bitrate;
     this->input_topic = input_topic;
     this->output_topic = output_topic;
@@ -61,17 +63,19 @@ struct TopicParam {
     this->encode_tune = encode_tune;
   }
 
-  bool operator==(const TopicParam & other) const {
+  bool operator==(const TopicParam & other) const
+  {
     return bitrate == other.bitrate &&
-      input_topic == other.input_topic &&
-      output_topic == other.output_topic &&
-      encoder_name == other.encoder_name &&
-      output_frame_rate == other.output_frame_rate &&
-      encode_preset == other.encode_preset &&
-      encode_tune == other.encode_tune;
+           input_topic == other.input_topic &&
+           output_topic == other.output_topic &&
+           encoder_name == other.encoder_name &&
+           output_frame_rate == other.output_frame_rate &&
+           encode_preset == other.encode_preset &&
+           encode_tune == other.encode_tune;
   }
 
-  bool operator<(const TopicParam & other) const {
+  bool operator<(const TopicParam & other) const
+  {
     if (bitrate != other.bitrate) {
       return bitrate < other.bitrate;
     }
@@ -94,9 +98,11 @@ struct TopicParam {
   }
 };
 
-class Config {
+class Config
+{
 public:
-  Config() {
+  Config()
+  {
     current_config_["enable_by_default"] = true;
     current_config_["log_directory"] = "/tmp/coencoder/log/";
     current_config_["log_level"] = "Debug";
@@ -105,7 +111,8 @@ public:
 
   ~Config() = default;
 
-  void load_config(const std::string & config_file) {
+  void load_config(const std::string & config_file)
+  {
     if (access(config_file.c_str(), F_OK) == -1) {
       COLOG_WARN("Config file does not exist");
       create_directory(config_file);
@@ -131,7 +138,8 @@ public:
     }
   }
 
-  bool update_config(const nlohmann::json & config_json) {
+  bool update_config(const nlohmann::json & config_json)
+  {
     if (!check_config(config_json)) {
       COLOG_ERROR("can't update config, invalid config!");
       throw std::runtime_error("Invalid config");
@@ -144,7 +152,8 @@ public:
     return true;
   }
 
-  void save_config(const std::string & path) const {
+  void save_config(const std::string & path) const
+  {
     std::ofstream config_file(path);
     if (!config_file.is_open()) {
       COLOG_WARN("failed to open config file while saving config");
@@ -156,7 +165,8 @@ public:
     COLOG_INFO("successfully saved config to file [%s]", path.c_str());
   }
 
-  std::string print_config() const {
+  std::string print_config() const
+  {
     return current_config_.dump(2);
   }
 
@@ -166,32 +176,39 @@ public:
   std::string log_level_{"Debug"};
 
 private:
-  static bool check_config(const nlohmann::json & json_obj) {
+  static bool check_config(const nlohmann::json & json_obj)
+  {
     if (!json_obj.contains("topics_param") || !json_obj["topics_param"].is_array()) {
       COLOG_ERROR("topics_param not found!");
       std::cerr << "topics_param not found!" << std::endl;
       return false;
     }
 
-    const nlohmann::json& params = json_obj["topics_param"];
+    const nlohmann::json & params = json_obj["topics_param"];
     for (const auto & param : params) {
       if (!param.contains("input") || !param["input"].is_string() ||
         !param.contains("output") || !param["output"].is_string() ||
-        !param.contains("bitrate") || !param["bitrate"].is_number()) {
+        !param.contains("bitrate") || !param["bitrate"].is_number())
+      {
         return false;
       }
 
       if (param.contains("encode_preset")) {
-        if (std::find(valid_encode_preset.begin(), valid_encode_preset.end(),
-                      param["encode_preset"].get<std::string>()) == valid_encode_preset.end()) {
-          COLOG_ERROR("invalid encode preset: %s",
-                      param["encode_preset"].get<std::string>().c_str());
+        if (std::find(
+            valid_encode_preset.begin(), valid_encode_preset.end(),
+            param["encode_preset"].get<std::string>()) == valid_encode_preset.end())
+        {
+          COLOG_ERROR(
+            "invalid encode preset: %s",
+            param["encode_preset"].get<std::string>().c_str());
           return false;
         }
       }
       if (param.contains("encode_tune")) {
-        if (std::find(valid_encode_tune.begin(), valid_encode_tune.end(),
-                      param["encode_tune"].get<std::string>()) == valid_encode_tune.end()) {
+        if (std::find(
+            valid_encode_tune.begin(), valid_encode_tune.end(),
+            param["encode_tune"].get<std::string>()) == valid_encode_tune.end())
+        {
           COLOG_ERROR("invalid encode tune: %s", param["encode_tune"].get<std::string>().c_str());
           return false;
         }
@@ -200,7 +217,8 @@ private:
     return true;
   }
 
-  void parse_config() {
+  void parse_config()
+  {
     if (current_config_.contains("enable_by_default")) {
       enable_by_default_ = current_config_["enable_by_default"].get<bool>();
     }
@@ -213,18 +231,18 @@ private:
 
     topics_param.clear();
     for (const auto & param : current_config_["topics_param"]) {
-      const std::string encoder_name = param.contains("encoder_name")
-                                         ? param["encoder_name"].get<std::string>()
-                                         : "libx264";
-      const int32_t output_frame_rate = param.contains("output_frame_rate")
-                                          ? param["output_frame_rate"].get<int32_t>()
-                                          : 0;
-      const std::string encode_preset = param.contains("encode_preset")
-                                          ? param["encode_preset"].get<std::string>()
-                                          : "ultrafast";
-      const std::string encode_tune = param.contains("encode_tune")
-                                        ? param["encode_tune"].get<std::string>()
-                                        : "zerolatency";
+      const std::string encoder_name = param.contains("encoder_name") ?
+        param["encoder_name"].get<std::string>() :
+        "libx264";
+      const int32_t output_frame_rate = param.contains("output_frame_rate") ?
+        param["output_frame_rate"].get<int32_t>() :
+        0;
+      const std::string encode_preset = param.contains("encode_preset") ?
+        param["encode_preset"].get<std::string>() :
+        "ultrafast";
+      const std::string encode_tune = param.contains("encode_tune") ?
+        param["encode_tune"].get<std::string>() :
+        "zerolatency";
       topics_param.emplace(
         std::move(
           TopicParam(
