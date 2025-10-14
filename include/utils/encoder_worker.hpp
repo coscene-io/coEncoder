@@ -128,8 +128,6 @@ private:
             topic_.c_str(), e.what());
         }
       } else {
-        // No frame available, sleep briefly to avoid busy-waiting
-        // 1ms sleep is enough to reduce CPU usage while maintaining responsiveness
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
     }

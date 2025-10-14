@@ -74,12 +74,10 @@ public:
 
     codec_context_->width = width;
     codec_context_->height = height;
-
     codec_context_->bit_rate = bitrate_;
-
-    codec_context_->time_base = (AVRational) {1, 1000};
     codec_context_->gop_size = 30;
     codec_context_->max_b_frames = 0;
+    codec_context_->time_base = (AVRational) {1, 1000};
     codec_context_->framerate = (AVRational) {30, 1};
 
     if (encoder_name_ == "h264_nvenc") {
@@ -130,31 +128,31 @@ public:
       av_dict_set(&codecOpts, "level", "3.1", 0);
 
       // Thread optimization for multiple encoders
-      av_dict_set(&codecOpts, "threads", "2", 0);          // Limit threads per encoder
+      av_dict_set(&codecOpts, "threads", "1", 0);          // Limit threads per encoder
       av_dict_set(&codecOpts, "sliced-threads", "1", 0);   // Use sliced threading
 
-      // Frame rate guarantee settings (minimal encoding complexity)
-      av_dict_set(&codecOpts, "refs", "1", 0);             // Single reference frame
-      av_dict_set(&codecOpts, "me_method", "dia", 0);      // Diamond search (fastest)
-      av_dict_set(&codecOpts, "subq", "1", 0);              // Minimal subpixel refinement
-      av_dict_set(&codecOpts, "trellis", "0", 0);           // Disable trellis quantization
-      av_dict_set(&codecOpts, "aq-mode", "0", 0);           // Disable adaptive quantization
-      av_dict_set(&codecOpts, "me_range", "4", 0);          // Small motion estimation range
-      av_dict_set(&codecOpts, "weightb", "0", 0);           // Disable weighted B-frames
-      av_dict_set(&codecOpts, "8x8dct", "0", 0);            // Disable 8x8 DCT
-      av_dict_set(&codecOpts, "fast-pskip", "1", 0);        // Enable fast P-skip
-
-      // Additional settings for frame rate guarantee
-      av_dict_set(&codecOpts, "rc-lookahead", "0", 0);      // No lookahead for immediate encoding
-      av_dict_set(&codecOpts, "no-scenecut", "1", 0);       // Disable scene cut detection
-      av_dict_set(&codecOpts, "bframes", "0", 0);           // No B-frames for simplicity
-      av_dict_set(&codecOpts, "b-adapt", "0", 0);           // Disable B-frame adaptation
-      av_dict_set(&codecOpts, "direct", "none", 0);         // Disable direct mode
-      av_dict_set(&codecOpts, "no-cabac", "1", 0);          // Disable CABAC for lower CPU
-      av_dict_set(&codecOpts, "no-deblock", "1", 0);        // Disable deblocking filter
-
-      // Minimize internal buffering
-      av_dict_set(&codecOpts, "sync-lookahead", "0", 0);    // Disable sync lookahead
+      // // Frame rate guarantee settings (minimal encoding complexity)
+      // av_dict_set(&codecOpts, "refs", "1", 0);             // Single reference frame
+      // av_dict_set(&codecOpts, "me_method", "dia", 0);      // Diamond search (fastest)
+      // av_dict_set(&codecOpts, "subq", "1", 0);              // Minimal subpixel refinement
+      // av_dict_set(&codecOpts, "trellis", "0", 0);           // Disable trellis quantization
+      // av_dict_set(&codecOpts, "aq-mode", "0", 0);           // Disable adaptive quantization
+      // av_dict_set(&codecOpts, "me_range", "4", 0);          // Small motion estimation range
+      // av_dict_set(&codecOpts, "weightb", "0", 0);           // Disable weighted B-frames
+      // av_dict_set(&codecOpts, "8x8dct", "0", 0);            // Disable 8x8 DCT
+      // av_dict_set(&codecOpts, "fast-pskip", "1", 0);        // Enable fast P-skip
+      //
+      // // Additional settings for frame rate guarantee
+      // av_dict_set(&codecOpts, "rc-lookahead", "0", 0);      // No lookahead for immediate encode
+      // av_dict_set(&codecOpts, "no-scenecut", "1", 0);       // Disable scene cut detection
+      // av_dict_set(&codecOpts, "bframes", "0", 0);           // No B-frames for simplicity
+      // av_dict_set(&codecOpts, "b-adapt", "0", 0);           // Disable B-frame adaptation
+      // av_dict_set(&codecOpts, "direct", "none", 0);         // Disable direct mode
+      // av_dict_set(&codecOpts, "no-cabac", "1", 0);          // Disable CABAC for lower CPU
+      // av_dict_set(&codecOpts, "no-deblock", "1", 0);        // Disable deblocking filter
+      //
+      // // Minimize internal buffering
+      // av_dict_set(&codecOpts, "sync-lookahead", "0", 0);    // Disable sync lookahead
     }
 
     if (avcodec_open2(codec_context_, codec_, &codecOpts) < 0) {

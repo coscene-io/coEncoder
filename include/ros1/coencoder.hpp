@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 #include <sys/stat.h>
+#include <memory>
 
 #include <ros/ros.h>
 #include <sensor_msgs/CompressedImage.h>
@@ -174,19 +175,19 @@ private:
       ros::Subscriber sub = nh_.subscribe<sensor_msgs::Image>(
         topic.input_topic, 1,
         [this, topic](const sensor_msgs::Image::ConstPtr & msg) {
-            if (encoding_enabled_) {
-              create_encoder_worker(topic, msg->width, msg->height);
+          if (encoding_enabled_) {
+            create_encoder_worker(topic, msg->width, msg->height);
 
-              // Convert and enqueue frame
-              auto cv_img = convert_to_CvMat(*msg);
-              auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000 +
-              msg->header.stamp.nsec / 1000000;
+            // Convert and enqueue frame
+            auto cv_img = convert_to_CvMat(*msg);
+            auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000 +
+            msg->header.stamp.nsec / 1000000;
 
-              auto worker_it = encoder_workers_.find(topic.output_topic);
-              if (worker_it != encoder_workers_.end()) {
-                worker_it->second->enqueue_frame(cv_img, timestamp);
-              }
+            auto worker_it = encoder_workers_.find(topic.output_topic);
+            if (worker_it != encoder_workers_.end()) {
+              worker_it->second->enqueue_frame(cv_img, timestamp);
             }
+          }
         });
       subscriber_map_.emplace(topic.input_topic, sub);
       subscribed_topics_params_.emplace(topic);
@@ -203,7 +204,7 @@ private:
             }
             create_encoder_worker(topic, decoded_img.cols, decoded_img.rows);
             auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000 +
-              msg->header.stamp.nsec / 1000000;
+            msg->header.stamp.nsec / 1000000;
 
             auto worker_it = encoder_workers_.find(topic.output_topic);
             if (worker_it != encoder_workers_.end()) {
@@ -233,7 +234,8 @@ private:
     subscribed_topics_params_.erase(topic);
   }
 
-  void create_encoder_worker(const TopicParam & topic, const int& width, const int& height) {
+  void create_encoder_worker(const TopicParam & topic, const int & width, const int & height)
+  {
     // Create encoder worker if not exists
     if (encoder_workers_.count(topic.output_topic) == 0) {
       try {
@@ -247,11 +249,11 @@ private:
 
         // Create encoder worker with publish callback
         auto publish_callback = [this, topic](CompressedVideoPtr frame) {
-          auto pub_it = publisher_map_.find(topic.output_topic);
-          if (pub_it != publisher_map_.end()) {
-            pub_it->second.publish(*frame);
-          }
-        };
+            auto pub_it = publisher_map_.find(topic.output_topic);
+            if (pub_it != publisher_map_.end()) {
+              pub_it->second.publish(*frame);
+            }
+          };
 
         auto worker = std::make_unique<EncoderWorker>(width, height, topic, publish_callback);
 
@@ -328,7 +330,5 @@ private:
   std::thread subscribe_update_thread_;
 
   int bitrate_ = 800000, depth_image_max_val_ = 10000;
-
 };
-
 #endif  // ROS1__COENCODER_HPP_
