@@ -40,6 +40,7 @@
 #include "utils/curl_client.hpp"
 #include "utils/config.hpp"
 #include "utils/encoder.hpp"
+#include "utils/encoder_worker.hpp"
 #include "utils/logger.hpp"
 #include "utils/thread_pool.hpp"
 
@@ -47,7 +48,7 @@ class CoEncoder
 {
 public:
   explicit CoEncoder(const std::string & config_file)
-  : nh_("~"), thread_pool_(1)
+  : nh_("~")
   {
     const char * home = std::getenv("HOME");
     if (config_file.empty()) {
@@ -62,27 +63,43 @@ public:
     } else {
       config_file_path_ = config_file;
     }
-    create_directory(config_file_path_);
+
     config_.load_config(config_file_path_);
-
-    size_t initial_thread_count = config_.topics_param.size();
-    if (initial_thread_count > 0) {
-      thread_pool_.resize(initial_thread_count);
-      COLOG_INFO(
-        "Initialized thread pool with %zu threads for %zu topics", initial_thread_count,
-        initial_thread_count);
-    }
-
-    update_logger(config_.log_directory_, config_.log_level_);
+    Logger::getInstance().set_log_dir(config_.log_directory_);
+    Logger::getInstance().set_log_level(config_.log_level_);
 
     COLOG_INFO("============================== coEncoder started ==============================");
     COLOG_INFO("config: \n%s", config_.print_config().c_str());
     update(config_);
 
+    config_update_thread_ = std::thread(
+      [this]() {
+        while (ros::ok() && !shutdown_requested_) {
+          try {
+            update_config_from_http();
+          } catch (const std::exception & e) {
+            COLOG_ERROR("Config update failed: %s", e.what());
+          }
+          for (int i = 0; i < 10 && !shutdown_requested_; ++i) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+          }
+        }
+      });
 
-    update_config_timer_ = nh_.createTimer(
-      ros::Duration(10), &CoEncoder::update_config_callback,
-      this);
+    subscribe_update_thread_ = std::thread(
+      [this]() {
+        while (ros::ok() && !shutdown_requested_) {
+          try {
+            std::lock_guard<std::mutex> lock(config_lock_);
+            update(config_);
+          } catch (const std::exception & e) {
+            COLOG_ERROR("Config update failed: %s", e.what());
+          }
+          for (int i = 0; i < 10 && !shutdown_requested_; ++i) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+          }
+        }
+      });
 
     encoder_ctrl_ = nh_.advertiseService<std_srvs::SetBool::Request, std_srvs::SetBool::Response>(
       "encoder_ctrl", [this](std_srvs::SetBool::Request & req, std_srvs::SetBool::Response & res) {
@@ -103,40 +120,7 @@ public:
   ~CoEncoder() = default;
 
 private:
-  void update_logger(const std::string & log_dir, const std::string & log_lvl)
-  {
-    Logger::getInstance().set_log_dir(log_dir);
-    Logger::getInstance().set_log_level(log_lvl);
-  }
-
-  void update(const Config & cfg)
-  {
-    encoding_enabled_ = cfg.enable_by_default_;
-
-    // 动态调整线程池大小，根据配置中的topic数量
-    size_t new_thread_count = cfg.topics_param.size();
-    if (new_thread_count > 0) {
-      size_t current_thread_count = thread_pool_.get_thread_count();
-      if (current_thread_count != new_thread_count) {
-        COLOG_INFO(
-          "Resizing thread pool from %zu to %zu threads", current_thread_count,
-          new_thread_count);
-        thread_pool_.resize(new_thread_count);
-      }
-    }
-
-    const auto & diff = findSetsDifference(subscribed_topics_params_, cfg.topics_param);
-    if (!diff.isIdentical()) {
-      for (const auto & it : diff.missing) {
-        removing_topic(it);
-      }
-      for (const auto & it : diff.added) {
-        subscribe_topic(it);
-      }
-    }
-  }
-
-  void update_config_callback(const ros::TimerEvent &)
+  void update_config_from_http()
   {
     auto resp = curl_client_.get("http://127.0.0.1:22524/config/current");
     if (resp.success) {
@@ -148,18 +132,35 @@ private:
           return;
         }
         const nlohmann::json encoder_config = response_json["plugin_config"]["coEncoder"];
-
-        if (config_.update_config(encoder_config)) {
-          COLOG_INFO("new config arrived, update with:\n%s ", encoder_config.dump(2).c_str());
-          update_logger(config_.log_directory_, config_.log_level_);
-          update(config_);
-          config_.save_config(config_file_path_);
+        {
+          std::lock_guard<std::mutex> lock(config_lock_);
+          if (config_.update_config(encoder_config)) {
+            COLOG_INFO("new config arrived, update with:\n%s ", encoder_config.dump(2).c_str());
+            config_.save_config(config_file_path_);
+          }
         }
       } catch (const nlohmann::json::parse_error & e) {
         COLOG_ERROR("Failed to parse JSON response: %s", e.what());
       }
     } else {
       COLOG_ERROR("GET request failed: %s", resp.error_message.c_str());
+    }
+  }
+
+  void update(const Config & cfg)
+  {
+    encoding_enabled_ = cfg.enable_by_default_;
+    Logger::getInstance().set_log_dir(cfg.log_directory_);
+    Logger::getInstance().set_log_level(cfg.log_level_);
+
+    const auto & diff = findSetsDifference(subscribed_topics_params_, cfg.topics_param);
+    if (!diff.isIdentical()) {
+      for (const auto & it : diff.missing) {
+        removing_topic(it);
+      }
+      for (const auto & it : diff.added) {
+        subscribe_topic(it);
+      }
     }
   }
 
@@ -173,53 +174,46 @@ private:
       ros::Subscriber sub = nh_.subscribe<sensor_msgs::Image>(
         topic.input_topic, 1,
         [this, topic](const sensor_msgs::Image::ConstPtr & msg) {
-          if (encoding_enabled_) {
-            if (encoder_map_.count(topic.input_topic) == 0) {
-              COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
-              encoder_map_.emplace(
-                std::piecewise_construct,
-                std::forward_as_tuple(topic.input_topic),
-                std::forward_as_tuple(msg->width, msg->height, topic));
+            if (encoding_enabled_) {
+              create_encoder_worker(topic, msg->width, msg->height);
+
+              // Convert and enqueue frame
+              auto cv_img = convert_to_CvMat(*msg);
+              auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000 +
+              msg->header.stamp.nsec / 1000000;
+
+              auto worker_it = encoder_workers_.find(topic.output_topic);
+              if (worker_it != encoder_workers_.end()) {
+                worker_it->second->enqueue_frame(cv_img, timestamp);
+              }
             }
-            process_image(
-              convertToCvMat(*msg), topic.input_topic,
-              static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nsec));
-          }
         });
       subscriber_map_.emplace(topic.input_topic, sub);
       subscribed_topics_params_.emplace(topic);
       COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
-      if (publisher_map_.count(topic.input_topic) == 0) {
-        COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
-        ros::Publisher pub = nh_.advertise<CompressedVideo>(topic.output_topic, 1);
-        publisher_map_.emplace(topic.input_topic, pub);
-      }
     } else if (topic_type == "sensor_msgs/CompressedImage") {
       ros::Subscriber sub = nh_.subscribe<sensor_msgs::CompressedImage>(
         topic.input_topic, 1,
         [this, topic](const sensor_msgs::CompressedImage::ConstPtr & msg) {
           if (encoding_enabled_) {
+            // Decode image
             const cv::Mat decoded_img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_UNCHANGED);
-            if (encoder_map_.count(topic.input_topic) == 0) {
-              COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
-              encoder_map_.emplace(
-                std::piecewise_construct,
-                std::forward_as_tuple(topic.input_topic),
-                std::forward_as_tuple(decoded_img.cols, decoded_img.rows, topic));
+            if (decoded_img.empty()) {
+              return;
             }
-            process_image(
-              decoded_img, topic.input_topic,
-              static_cast<int64_t>(msg->header.stamp.sec * 1e9 + msg->header.stamp.nsec));
+            create_encoder_worker(topic, decoded_img.cols, decoded_img.rows);
+            auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000 +
+              msg->header.stamp.nsec / 1000000;
+
+            auto worker_it = encoder_workers_.find(topic.output_topic);
+            if (worker_it != encoder_workers_.end()) {
+              worker_it->second->enqueue_frame(decoded_img, timestamp);
+            }
           }
         });
       subscriber_map_.emplace(topic.input_topic, sub);
       subscribed_topics_params_.emplace(topic);
       COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
-      if (publisher_map_.count(topic.input_topic) == 0) {
-        COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
-        ros::Publisher pub = nh_.advertise<CompressedVideo>(topic.output_topic, 1);
-        publisher_map_.emplace(topic.input_topic, pub);
-      }
     } else {
       COLOG_INFO(
         "Unsupported message type [%s] for topic '%s'", topic_type.c_str(),
@@ -233,13 +227,49 @@ private:
     publisher_map_.erase(topic.input_topic);
 
     COLOG_DEBUG("destruct encoder of topic [ %s ]", topic.input_topic.c_str());
-    encoder_map_.erase(topic.input_topic);
+    encoder_workers_.erase(topic.input_topic);
     subscriber_map_.erase(topic.input_topic);
 
     subscribed_topics_params_.erase(topic);
   }
 
-  static cv::Mat convertToCvMat(const sensor_msgs::Image & img_msg)
+  void create_encoder_worker(const TopicParam & topic, const int& width, const int& height) {
+    // Create encoder worker if not exists
+    if (encoder_workers_.count(topic.output_topic) == 0) {
+      try {
+        COLOG_INFO("Creating encoder worker for [%s]", topic.output_topic.c_str());
+
+        // Create publisher if not exists
+        if (publisher_map_.count(topic.output_topic) == 0) {
+          ros::Publisher pub = nh_.advertise<CompressedVideo>(topic.output_topic, 10);
+          publisher_map_.emplace(topic.output_topic, pub);
+        }
+
+        // Create encoder worker with publish callback
+        auto publish_callback = [this, topic](CompressedVideoPtr frame) {
+          auto pub_it = publisher_map_.find(topic.output_topic);
+          if (pub_it != publisher_map_.end()) {
+            pub_it->second.publish(*frame);
+          }
+        };
+
+        auto worker = std::make_unique<EncoderWorker>(width, height, topic, publish_callback);
+
+        encoder_workers_.emplace(topic.output_topic, std::move(worker));
+        COLOG_DEBUG(
+          "Encoder worker [%s] created successfully",
+          topic.output_topic.c_str());
+      } catch (const std::exception & e) {
+        COLOG_ERROR(
+          "Failed to create encoder worker [%s]: %s",
+          topic.output_topic.c_str(),
+          e.what());
+        return;
+      }
+    }
+  }
+
+  static cv::Mat convert_to_CvMat(const sensor_msgs::Image & img_msg)
   {
     int cv_type = CV_8UC3;
     std::string encoding = img_msg.encoding;
@@ -258,46 +288,6 @@ private:
     cv::Mat image(img_msg.height, img_msg.width, cv_type, const_cast<uchar *>(img_msg.data.data()),
       img_msg.step);
     return image;
-  }
-
-  void process_image(const cv::Mat & img, const std::string & topic, const int64_t & timestamp)
-  {
-    if (img.empty()) {
-      COLOG_WARN("Empty image received");
-      return;
-    }
-
-    // 提交到线程池异步处理，避免阻塞主线程
-    thread_pool_.enqueue(
-      [this, img, topic, timestamp]() {
-        process_image_single(img, topic, timestamp);
-      });
-  }
-
-  void process_image_single(
-    const cv::Mat & img, const std::string & topic,
-    const int64_t & timestamp)
-  {
-    auto encoder_it = encoder_map_.find(topic);
-    if (encoder_it == encoder_map_.end()) {
-      COLOG_WARN("Encoder not found for topic: %s", topic.c_str());
-      return;
-    }
-    try {
-      // Send frame to encoder
-      encoder_it->second.send_frame(img, timestamp);
-
-      // Try to retrieve encoded frame (may return nullptr if encoder needs more input)
-      const auto frame = encoder_it->second.encode_frame();
-      if (frame) {
-        auto pub_it = publisher_map_.find(topic);
-        if (pub_it != publisher_map_.end()) {
-          pub_it->second.publish(*frame);
-        }
-      }
-    } catch (const std::exception & e) {
-      COLOG_ERROR("Encoding failed for topic %s: %s", topic.c_str(), e.what());
-    }
   }
 
   std::string get_topic_type(const std::string & topic_name)
@@ -328,13 +318,17 @@ private:
 
   ros::ServiceServer encoder_ctrl_;
 
-  std::map<std::string, H264Encoder> encoder_map_;
+  std::map<std::string, std::unique_ptr<EncoderWorker>> encoder_workers_;
+
+  std::mutex config_lock_;
+
+  std::atomic<bool> shutdown_requested_{false};
+
+  std::thread config_update_thread_;
+  std::thread subscribe_update_thread_;
 
   int bitrate_ = 800000, depth_image_max_val_ = 10000;
 
-  ros::Timer update_config_timer_;
-
-  ThreadPool thread_pool_;
 };
 
 #endif  // ROS1__COENCODER_HPP_

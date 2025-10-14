@@ -310,7 +310,7 @@ public:
 #endif
 
       av_packet_unref(&pkt);
-      packets_received_++;
+      ++packets_received_;
       return std::make_shared<CompressedVideo>(video_msg);
     } else {
       if (ret == AVERROR(EAGAIN)) {

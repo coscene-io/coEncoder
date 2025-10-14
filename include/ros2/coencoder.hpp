@@ -42,11 +42,10 @@
 #include "json.hpp"
 
 #include "utils/config.hpp"
-#include "utils/encoder.hpp"
+#include "utils/encoder_worker.hpp"
 #include "utils/util.hpp"
 #include "utils/logger.hpp"
 #include "utils/curl_client.hpp"
-#include "utils/thread_pool.hpp"
 
 constexpr size_t DEFAULT_MIN_QOS_DEPTH = 1;
 constexpr size_t DEFAULT_MAX_QOS_DEPTH = 100;  // Increase QoS depth for high frame rate
@@ -54,21 +53,11 @@ constexpr size_t DEFAULT_MAX_QOS_DEPTH = 100;  // Increase QoS depth for high fr
 using Image = sensor_msgs::msg::Image;
 using CompressedImage = sensor_msgs::msg::CompressedImage;
 
-struct FrameRateInfo
-{
-  int32_t output_framerate;
-  std::deque<int64_t> timestamp_window;  // Time window for frequency calculation
-  static constexpr int64_t WINDOW_SIZE_MS = 2000;  // 2 seconds window
-
-  explicit FrameRateInfo(const int32_t & framerate)
-  : output_framerate(framerate) {}
-};
-
 class CoEncoder : public rclcpp::Node
 {
 public:
   explicit CoEncoder(const std::string & config_path)
-  : Node("coencoder"), thread_pool_(std::max(1u, std::thread::hardware_concurrency() / 2))
+  : Node("coencoder")/*, thread_pool_(std::max(1u, std::thread::hardware_concurrency() / 2))*/
   {
     RCLCPP_INFO(this->get_logger(), "CoEncoder constructor started");
 
@@ -88,17 +77,6 @@ public:
 
     RCLCPP_INFO(this->get_logger(), "Loading config [%s] ...", config_file_path_.c_str());
     config_.load_config(config_file_path_);
-
-    const size_t initial_thread_count = config_.topics_param.size();
-    RCLCPP_INFO(this->get_logger(), "Found %zu topics in config", config_.topics_param.size());
-
-    if (initial_thread_count > 0) {
-      RCLCPP_INFO(
-        this->get_logger(), "Initializing thread pool with %zu threads (one per topic)",
-        initial_thread_count);
-      thread_pool_.resize(initial_thread_count);
-      RCLCPP_INFO(this->get_logger(), "Thread pool resized to %zu threads", initial_thread_count);
-    }
 
     RCLCPP_INFO(this->get_logger(), "Setting up logger...");
     Logger::getInstance().set_log_dir(config_.log_directory_);
@@ -153,17 +131,6 @@ public:
           COLOG_INFO("encoder disabled");
         }
       });
-
-    // Create a timer to periodically print encoder statistics (every 10 seconds)
-    stats_timer_ = this->create_wall_timer(
-      std::chrono::seconds(10),
-      [this]() {
-        for (auto & kv : encoder_map_) {
-          kv.second.print_stats();
-        }
-        COLOG_DEBUG("---------------------------------------------------------------------------");
-      });
-
     RCLCPP_INFO(this->get_logger(), "CoEncoder constructor completed successfully");
   }
 
@@ -212,17 +179,6 @@ private:
     Logger::getInstance().set_log_dir(cfg.log_directory_);
     Logger::getInstance().set_log_level(cfg.log_level_);
 
-    const size_t new_thread_count = cfg.topics_param.size();
-    if (new_thread_count > 0) {
-      size_t current_thread_count = thread_pool_.get_thread_count();
-      if (current_thread_count != new_thread_count) {
-        COLOG_INFO(
-          "Resizing thread pool from %zu to %zu threads (one per topic)",
-          current_thread_count, new_thread_count);
-        thread_pool_.resize(new_thread_count);
-      }
-    }
-
     const auto & diff = findSetsDifference(subscribed_topics_params_, cfg.topics_param);
     if (!diff.isIdentical()) {
       for (const auto & it : diff.missing) {
@@ -240,7 +196,7 @@ private:
     publisher_map_.erase(topic.output_topic);
 
     COLOG_DEBUG("destruct encoder of topic [ %s ]", topic.output_topic.c_str());
-    encoder_map_.erase(topic.output_topic);
+    encoder_workers_.erase(topic.output_topic);
     subscribed_topics_params_.erase(topic);
 
     if (image_sub_.find(topic.output_topic) != image_sub_.end()) {
@@ -272,108 +228,24 @@ private:
           topic.input_topic, qos,
           [this, topic](Image::SharedPtr msg) {
             if (encoding_enabled_) {
-              if (encoder_map_.count(topic.output_topic) == 0) {
-                try {
-                  COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
-                  encoder_map_.emplace(
-                    std::piecewise_construct,
-                    std::forward_as_tuple(topic.output_topic),
-                    std::forward_as_tuple(msg->width, msg->height, topic));
-                  COLOG_DEBUG("encoder [%s] created successfully", topic.output_topic.c_str());
+              // Create encoder worker if not exists
 
-                  frame_rate_info_.emplace(
-                    std::piecewise_construct,
-                    std::forward_as_tuple(topic.output_topic),
-                    std::forward_as_tuple(topic.output_frame_rate));
-                } catch (const std::exception & e) {
-                  COLOG_ERROR(
-                    "Failed to create encoder [%s]: %s", topic.output_topic.c_str(),
-                    e.what());
-                  return;
-                }
-              }
-
-              auto cv_img = convertToCvMat(*msg);
+              create_encoder_worker(topic, msg->width, msg->height);
+              // Convert and enqueue frame
+              auto cv_img = convert_to_CvMat(*msg);
               auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000 +
               msg->header.stamp.nanosec / 1000000;
-              thread_pool_.enqueue(
-                [this, cv_img, topic, timestamp]() {
-                  try {
-                    const auto encoder_it = encoder_map_.find(topic.output_topic);
-                    if (encoder_it == encoder_map_.end()) {
-                      COLOG_WARN("Encoder not found for topic: %s", topic.output_topic.c_str());
-                      return;
-                    }
 
-                    const auto frame_rate_info_it = frame_rate_info_.find(topic.output_topic);
-                    if (frame_rate_info_it == frame_rate_info_.end()) {
-                      COLOG_WARN(
-                        "frame rate info not found for topic: %s",
-                        topic.output_topic.c_str());
-                      return;
-                    }
-
-                    if (!resample_fps(frame_rate_info_it->second, timestamp)) {
-                      return;
-                    }
-
-                    int send_ret = encoder_it->second.send_frame(cv_img, timestamp);
-
-                    if (send_ret == AVERROR(EAGAIN)) {
-                      COLOG_DEBUG(
-                        "Draining encoder output buffer for topic: %s",
-                        topic.output_topic.c_str());
-                      // Keep retrieving packets until no more are available
-                      int drained_count = 0;
-                      while (true) {
-                        const auto frame = encoder_it->second.encode_frame();
-                        if (frame) {
-                          const auto pub_it = publisher_map_.find(topic.output_topic);
-                          if (pub_it != publisher_map_.end()) {
-                            pub_it->second->publish(*frame);
-                          }
-                          drained_count++;
-                        } else {
-                          break;
-                        }
-                      }
-                      COLOG_DEBUG("Drained %d packets, retrying send_frame", drained_count);
-                      send_ret = encoder_it->second.send_frame(cv_img, timestamp);
-                      if (send_ret < 0 && send_ret != AVERROR(EAGAIN)) {
-                        COLOG_WARN(
-                          "send_frame failed after draining for topic: %s",
-                          topic.output_topic.c_str());
-                      }
-                    }
-
-                    const auto frame = encoder_it->second.encode_frame();
-                    if (frame) {
-                      const auto pub_it = publisher_map_.find(topic.output_topic);
-                      if (pub_it != publisher_map_.end()) {
-                        pub_it->second->publish(*frame);
-                      }
-                    }
-                  } catch (const std::exception & e) {
-                    COLOG_ERROR(
-                      "Exception in thread pool processing for topic %s: %s",
-                      topic.output_topic.c_str(), e.what());
-                  } catch (...) {
-                    COLOG_ERROR(
-                      "Unknown exception in thread pool processing for topic %s",
-                      topic.output_topic.c_str());
-                  }
-                });
+              auto worker_it = encoder_workers_.find(topic.output_topic);
+              if (worker_it != encoder_workers_.end()) {
+                worker_it->second->enqueue_frame(cv_img, timestamp);
+              }
             }
           });
         subscribed_topics_params_.emplace(topic);
         image_sub_.emplace(topic.output_topic, img_sub);
 
         COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
-        if (publisher_map_.count(topic.output_topic) == 0) {
-          COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
-          const auto pub = this->create_publisher<CompressedVideo>(topic.output_topic, 10);
-          publisher_map_.emplace(topic.output_topic, pub);
-        }
       } else if (msg_type == "sensor_msgs/msg/CompressedImage") {
         COLOG_DEBUG("msg_type: sensor_msgs/msg/CompressedImage");
         rclcpp::QoS qos{1};
@@ -386,118 +258,25 @@ private:
           topic.input_topic, qos,
           [this, topic](CompressedImage::SharedPtr msg) {
             if (encoding_enabled_) {
+              // Decode image
               const cv::Mat decoded_img = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_UNCHANGED);
               if (decoded_img.empty()) {
                 return;
               }
-              if (encoder_map_.count(topic.output_topic) == 0) {
-                try {
-                  COLOG_INFO("create encoder [%s]", topic.output_topic.c_str());
-                  encoder_map_.emplace(
-                    std::piecewise_construct,
-                    std::forward_as_tuple(topic.output_topic),
-                    std::forward_as_tuple(decoded_img.cols, decoded_img.rows, topic));
-                  COLOG_DEBUG("encoder [%s] created successfully", topic.output_topic.c_str());
-
-                  frame_rate_info_.emplace(
-                    std::piecewise_construct,
-                    std::forward_as_tuple(topic.output_topic),
-                    std::forward_as_tuple(topic.output_frame_rate));
-                } catch (const std::exception & e) {
-                  COLOG_ERROR(
-                    "Failed to create encoder [%s]: %s", topic.output_topic.c_str(),
-                    e.what());
-                  return;
-                }
-              }
+              create_encoder_worker(topic, decoded_img.cols, decoded_img.rows);
               auto timestamp = static_cast<int64_t>(msg->header.stamp.sec) * 1000 +
-              msg->header.stamp.nanosec / 1000000;
-              const auto start = std::chrono::high_resolution_clock::now();
-              thread_pool_.enqueue(
-                [this, decoded_img, topic, timestamp]() {
-                  try {
-                    const auto encoder_it = encoder_map_.find(topic.output_topic);
-                    if (encoder_it == encoder_map_.end()) {
-                      COLOG_WARN("Encoder not found for topic: %s", topic.output_topic.c_str());
-                      return;
-                    }
+                msg->header.stamp.nanosec / 1000000;
 
-                    const auto frame_rate_info_it = frame_rate_info_.find(topic.output_topic);
-                    if (frame_rate_info_it == frame_rate_info_.end()) {
-                      COLOG_WARN(
-                        "frame rate info not found for topic: %s",
-                        topic.output_topic.c_str());
-                      return;
-                    }
-
-                    if (!resample_fps(frame_rate_info_it->second, timestamp)) {
-                      return;
-                    }
-
-                    // Send frame to encoder
-                    int send_ret = encoder_it->second.send_frame(decoded_img, timestamp);
-
-                    // If send_frame returns EAGAIN, we must drain all output packets first
-                    if (send_ret == AVERROR(EAGAIN)) {
-                      COLOG_DEBUG(
-                        "Draining encoder output buffer for topic: %s",
-                        topic.output_topic.c_str());
-                      // Keep retrieving packets until no more are available
-                      int drained_count = 0;
-                      while (true) {
-                        const auto frame = encoder_it->second.encode_frame();
-                        if (frame) {
-                          const auto pub_it = publisher_map_.find(topic.output_topic);
-                          if (pub_it != publisher_map_.end()) {
-                            pub_it->second->publish(*frame);
-                          }
-                          drained_count++;
-                        } else {
-                          break;  // No more packets available
-                        }
-                      }
-                      COLOG_DEBUG("Drained %d packets, retrying send_frame", drained_count);
-                      // Retry sending the frame after draining
-                      send_ret = encoder_it->second.send_frame(decoded_img, timestamp);
-                      if (send_ret < 0 && send_ret != AVERROR(EAGAIN)) {
-                        COLOG_WARN(
-                          "send_frame failed after draining for topic: %s",
-                          topic.output_topic.c_str());
-                      }
-                    }
-
-                    // Always try to retrieve at least one encoded frame
-                    const auto frame = encoder_it->second.encode_frame();
-                    if (frame) {
-                      const auto pub_it = publisher_map_.find(topic.output_topic);
-                      if (pub_it != publisher_map_.end()) {
-                        pub_it->second->publish(*frame);
-                      }
-                    }
-                  } catch (const std::exception & e) {
-                    COLOG_ERROR(
-                      "Exception in thread pool processing for topic %s: %s",
-                      topic.output_topic.c_str(), e.what());
-                  } catch (...) {
-                    COLOG_ERROR(
-                      "Unknown exception in thread pool processing for topic %s",
-                      topic.output_topic.c_str());
-                  }
-                });
-
-              const auto end = std::chrono::high_resolution_clock::now();
-              COLOG_DEBUG("enqueue takes %d ns", (end - start).count());
+              auto worker_it = encoder_workers_.find(topic.output_topic);
+              if (worker_it != encoder_workers_.end()) {
+                worker_it->second->enqueue_frame(decoded_img, timestamp);
+              }
             }
           });
         subscribed_topics_params_.emplace(topic);
         comp_image_sub_.emplace(topic.output_topic, comp_sub);
 
         COLOG_INFO("topic [ %s ] subscribed!", topic.input_topic.c_str());
-        if (publisher_map_.count(topic.output_topic) == 0) {
-          COLOG_INFO("create publisher [%s]", topic.output_topic.c_str());
-          const auto pub = this->create_publisher<CompressedVideo>(topic.output_topic, 10);
-          publisher_map_.emplace(topic.output_topic, pub);
-        }
       } else {
         COLOG_ERROR("unsupported topic type: %s", topic.input_topic.c_str());
       }
@@ -506,7 +285,43 @@ private:
     }
   }
 
-  static cv::Mat convertToCvMat(const Image & img_msg)
+  void create_encoder_worker(const TopicParam & topic, const int& width, const int& height) {
+    // Create encoder worker if not exists
+    if (encoder_workers_.count(topic.output_topic) == 0) {
+      try {
+        COLOG_INFO("Creating encoder worker for [%s]", topic.output_topic.c_str());
+
+        // Create publisher if not exists
+        if (publisher_map_.count(topic.output_topic) == 0) {
+          auto pub = this->create_publisher<CompressedVideo>(topic.output_topic, 10);
+          publisher_map_.emplace(topic.output_topic, pub);
+        }
+
+        // Create encoder worker with publish callback
+        auto publish_callback = [this, topic](CompressedVideoPtr frame) {
+          auto pub_it = publisher_map_.find(topic.output_topic);
+          if (pub_it != publisher_map_.end()) {
+            pub_it->second->publish(*frame);
+          }
+        };
+
+        auto worker = std::make_unique<EncoderWorker>(width, height, topic, publish_callback);
+
+        encoder_workers_.emplace(topic.output_topic, std::move(worker));
+        COLOG_DEBUG(
+          "Encoder worker [%s] created successfully",
+          topic.output_topic.c_str());
+      } catch (const std::exception & e) {
+        COLOG_ERROR(
+          "Failed to create encoder worker [%s]: %s",
+          topic.output_topic.c_str(),
+          e.what());
+        return;
+      }
+    }
+  }
+
+  static cv::Mat convert_to_CvMat(const Image & img_msg)
   {
     int cv_type = CV_8UC3;
     const std::string & encoding = img_msg.encoding;
@@ -528,43 +343,6 @@ private:
       img_msg.step);
 
     return result.clone();
-  }
-
-  static bool resample_fps(FrameRateInfo & fri, const int64_t & timestamp)
-  {
-    // Check if we should process this frame based on output framerate limit
-    if (fri.output_framerate == 0) {
-      return true;
-    }
-
-    const int64_t window_threshold = timestamp - FrameRateInfo::WINDOW_SIZE_MS;
-    if (!fri.timestamp_window.empty() && fri.timestamp_window.front() < window_threshold) {
-      auto it = std::lower_bound(
-        fri.timestamp_window.begin(),
-        fri.timestamp_window.end(), window_threshold);
-      fri.timestamp_window.erase(fri.timestamp_window.begin(), it);
-    }
-
-    if (fri.timestamp_window.empty()) {
-      fri.timestamp_window.push_back(timestamp);
-      return true;
-    }
-
-    const int64_t time_span = timestamp - fri.timestamp_window.front();
-    if (time_span <= 0) {
-      return false;
-    }
-
-    const float current_frequency_in_window = static_cast<float>(fri.timestamp_window.size()) *
-      1000.0f / static_cast<float>(time_span);
-
-    if (current_frequency_in_window < static_cast<float>(fri.output_framerate)) {
-      fri.timestamp_window.push_back(timestamp);
-      return true;
-    }
-
-    // Frame rate exceeded, skip this frame
-    return false;
   }
 
   bool get_publisher_qos(const std::string & topic, rclcpp::QoS & qos)
@@ -679,17 +457,14 @@ private:
   std::map<std::string, std::shared_ptr<rclcpp::Subscription<Image>>> image_sub_;
   std::map<std::string, std::shared_ptr<rclcpp::Subscription<CompressedImage>>> comp_image_sub_;
   std::map<std::string, std::shared_ptr<rclcpp::Publisher<CompressedVideo>>> publisher_map_;
-  std::map<std::string, H264Encoder> encoder_map_;
-  std::map<std::string, FrameRateInfo> frame_rate_info_;
+  std::map<std::string, std::unique_ptr<EncoderWorker>> encoder_workers_;
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr encoder_ctrl_;
-  rclcpp::TimerBase::SharedPtr stats_timer_;
+
   std::thread config_update_thread_;
   std::thread subscribe_update_thread_;
 
   int depth_image_max_val_ = 10000;
-  ThreadPool thread_pool_;
-  std::atomic<size_t> thread_pool_target_size_{0};
 };
 
 #endif  // ROS2__COENCODER_HPP_
