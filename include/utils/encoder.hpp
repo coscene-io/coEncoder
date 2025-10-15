@@ -206,7 +206,11 @@ public:
   int send_frame(const cv::Mat & img, const int64_t & timestamp)
   {
     try {
-      received_ = true;
+      if (!received_) {
+        received_ = true;
+        first_frame_timestamp = timestamp;
+      }
+      last_frame_timestamp = timestamp;
       std::lock_guard<std::mutex> lock(mutex_);
 
       cv::Mat yuv_img;
@@ -331,13 +335,13 @@ public:
   void print_stats() const
   {
     COLOG_DEBUG(
-      "[%s] stats - Sent: %lu, Output: %lu, Send_EAGAIN: %lu, Recv_EAGAIN: %lu, Ratio: %.2f%%",
+      "[%s] Sent: %lu, Output: %lu, Send_EAGAIN: %lu, Recv_EAGAIN: %lu, output FPS: %.2f",
       encoder_topic_.c_str(),
       frames_sent_.load(),
       packets_received_.load(),
       send_eagain_count_.load(),
       recv_eagain_count_.load(),
-      frames_sent_ > 0 ? (packets_received_.load() * 100.0 / frames_sent_.load()) : 0.0
+      frames_sent_ > 0 ? (packets_received_.load() * 1000.0 / (last_frame_timestamp.load() - first_frame_timestamp.load())) : 0.0
     );
   }
 
@@ -351,6 +355,9 @@ private:
 
   std::mutex mutex_;
   std::atomic<bool> received_{false};
+
+  std::atomic<int64_t>  first_frame_timestamp{0};
+  std::atomic<int64_t>  last_frame_timestamp{0};
 
   // Performance statistics
   std::atomic<uint64_t> frames_sent_{0};

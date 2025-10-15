@@ -89,11 +89,14 @@ public:
       [this]() {
         while (rclcpp::ok() && !shutdown_requested_) {
           try {
+            COLOG_DEBUG("-------------------------- Statistics --------------------------");
+            for (const auto& worker : encoder_workers_) {
+              worker.second->get_encoder().print_stats();
+            }
             update_config_from_http();
           } catch (const std::exception & e) {
             COLOG_ERROR("Config update failed: %s", e.what());
           }
-
           for (int i = 0; i < 10 && !shutdown_requested_; ++i) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
           }
@@ -109,7 +112,6 @@ public:
           } catch (const std::exception & e) {
             COLOG_ERROR("Config update failed: %s", e.what());
           }
-
           for (int i = 0; i < 10 && !shutdown_requested_; ++i) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
           }
