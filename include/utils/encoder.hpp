@@ -341,7 +341,9 @@ public:
       packets_received_.load(),
       send_eagain_count_.load(),
       recv_eagain_count_.load(),
-      frames_sent_ > 0 ? (packets_received_.load() * 1000.0 / (last_frame_timestamp.load() - first_frame_timestamp.load())) : 0.0
+      frames_sent_ >
+      0 ? (packets_received_.load() * 1000.0 /
+      (last_frame_timestamp.load() - first_frame_timestamp.load())) : 0.0
     );
   }
 
@@ -356,8 +358,8 @@ private:
   std::mutex mutex_;
   std::atomic<bool> received_{false};
 
-  std::atomic<int64_t>  first_frame_timestamp{0};
-  std::atomic<int64_t>  last_frame_timestamp{0};
+  std::atomic<int64_t> first_frame_timestamp{0};
+  std::atomic<int64_t> last_frame_timestamp{0};
 
   // Performance statistics
   std::atomic<uint64_t> frames_sent_{0};

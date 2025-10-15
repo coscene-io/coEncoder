@@ -90,7 +90,7 @@ public:
         while (rclcpp::ok() && !shutdown_requested_) {
           try {
             COLOG_DEBUG("-------------------------- Statistics --------------------------");
-            for (const auto& worker : encoder_workers_) {
+            for (const auto & worker : encoder_workers_) {
               worker.second->get_encoder().print_stats();
             }
             update_config_from_http();
