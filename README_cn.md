@@ -31,13 +31,17 @@ coencoder目前支持使用GPU进行编码，目前支持以下编码器：
       "bitrate": 1600000,
       "encoder_name": "h264_nvenc",
       "input": "/camera_0/raw_image",
-      "output": "/camera_0/raw_image/h264"
+      "output": "/camera_0/raw_image/h264",
+      "encode_preset": "ultrafast",
+      "encode_tune": "zerolatency"
     },
     {
       "bitrate": 1600000,
       "encoder_name": "libx264",
       "input": "/camera_1/raw_image",
-      "output": "/camera_1/raw_image/h264"
+      "output": "/camera_1/raw_image/h264",
+      "encode_preset": "ultrafast",
+      "encode_tune": "zerolatency"
     }
   ]
 }
@@ -50,6 +54,31 @@ coencoder目前支持使用GPU进行编码，目前支持以下编码器：
   * **encoder_name:** 编码器名称，支持`h264_nvenc`、`h264_qsv`、`h264_amf`、`h264_vaapi`，同时也可以使用`libx264`通过CPU编码帧. 如果配置中缺失该字段,则使用 `libx264` 进行编码
   * **input:** 输入topic名称
   * **output:** 输出topic名称
+  * **encode_preset:**
+  
+    | 有效值                    | 编码速度      | CPU使用率      | 质量/编码率           |
+    |:---------------------------|:--------------|:---------------|:---------------------|
+    | **ultrafast**  *(默认)*    | 🚀 极快        | 🟢 最低        | 🔴 最差（码率最高）    |
+    | **superfast**              | 🚀 很快        | 🟢 很低        | 🔴 很差              |
+    | **veryfast**               | ⚡ 快          | 🟢 低          | 🟠 略差              |
+    | **faster**                 | 快            | 🟡 中等偏低     | 🟡 一般              |
+    | **fast**                   | 中等偏快        | 🟡 中等        | 🟢 还可以             |
+    | **medium**                 | 平衡          | 🟠 中等偏高     | 🟢 推荐默认           |
+    | **slow**                   | 慢            | 🔴 高          | 🟢 好                |
+    | **slower**                 | 更慢          | 🔴 高          | 🟢 更好              |
+    | **veryslow**               | 极慢          | 🔴 最高        | 🟢 最佳压缩率         |
+    | **placebo**                | 💀 极慢        | 🔴 极高        | 🟢 几乎无额外收益      |
+  * **encode_tune:**
+  
+    | 调优选项                    | 作用                                                            | CPU使用率               |
+    |:----------------------------|:----------------------------------------------------------------|:------------------------|
+    | **film**                    | 针对高质量电影素材（保细节、抗噪）                                | 🔴 稍高                 |
+    | **animation**               | 针对动画（锐化边缘）                                             | 🔴 稍高                 |
+    | **grain**                   | 保留胶片颗粒（复杂度高）                                         | 🔴 显著升高             |
+    | **stillimage**              | 针对静态图像                                                     | 🟡 一般                 |
+    | **psnr / ssim**             | 用于质量测试（不推荐）                                            | 🔴 稍高                 |
+    | **fastdecode**              | 便于快速解码（减少B帧等）                                        | 🟢 较低                 |
+    | **zerolatency** *(默认)*    | 低延迟实时传输（去掉缓冲）                                        | 🟢 较低                 |
 
 ## 在线配置修改
 **在线配置修改需要 coScout v1.1.8 或更高版本**
@@ -64,6 +93,7 @@ coencoder目前支持使用GPU进行编码，目前支持以下编码器：
   * 配置有效性
     * 配置必须包含`topics_param`字段，且该字段必须为数组类型。
     * `topics_param`中的元素必须包含三个字段：`input`、`output`、`bitrate`。`input`和`output`为字符串，`bitrate`为整数。
+    * `encoder_name`、`encode_preset`和`encode_tune`字段为可选字段。如果在`topics_param`中未明确指定这些字段，coEncoder将使用h264编码的默认值
 
 ## 编译或deb安装
 

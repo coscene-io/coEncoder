@@ -46,39 +46,38 @@ extern "C" {
 class H264Encoder
 {
 public:
-  H264Encoder(
-    const int width, const int height,
-    const int bitrate = 1600000, const std::string & encoder_name = "libx264")
+  H264Encoder(const int width, const int height, const TopicParam & param)
   {
 #ifdef ROS_VERSION_1
     avcodec_register_all();
 #endif
 
-    bitrate_ = bitrate;
-    encoder_name_ = encoder_name;
+    bitrate_ = param.bitrate;
+    encoder_topic_ = param.input_topic;
+    encoder_name_ = param.encoder_name;
     codec_ = avcodec_find_encoder_by_name(encoder_name_.c_str());
     if (!codec_) {
-      COLOG_INFO("create encoder with [%s] failed, not found", encoder_name.c_str());
+      COLOG_INFO(
+        "create [%s] encoder with [%s] failed, not found",
+        encoder_topic_.c_str(), encoder_name_.c_str());
       throw std::runtime_error("encoder not found");
     }
     COLOG_INFO(
-      "create encoder with [%s], width: %d, height: %d",
-      encoder_name.c_str(), width, height);
+      "create [%s] encoder with [%s], width: %d, height: %d",
+      encoder_topic_.c_str(), encoder_name_.c_str(), width, height);
 
     codec_context_ = avcodec_alloc_context3(codec_);
     if (!codec_context_) {
-      COLOG_ERROR("Could not allocate video codec context");
+      COLOG_ERROR("Could not allocate video codec context for topic [%s]", encoder_topic_.c_str());
       throw std::runtime_error("Could not allocate video codec context");
     }
 
     codec_context_->width = width;
     codec_context_->height = height;
-
     codec_context_->bit_rate = bitrate_;
-
-    codec_context_->time_base = (AVRational) {1, 1000};
     codec_context_->gop_size = 30;
     codec_context_->max_b_frames = 0;
+    codec_context_->time_base = (AVRational) {1, 1000};
     codec_context_->framerate = (AVRational) {30, 1};
 
     if (encoder_name_ == "h264_nvenc") {
@@ -94,50 +93,66 @@ public:
     AVDictionary * codecOpts = nullptr;
 
     if (encoder_name_ == "h264_nvenc") {
-      av_dict_set(&codecOpts, "preset", "llhq", 0);
-      av_dict_set(&codecOpts, "tune", "ll", 0);
+      av_dict_set(&codecOpts, "preset", param.encode_preset.c_str(), 0);
+      av_dict_set(&codecOpts, "tune", param.encode_tune.c_str(), 0);
       av_dict_set(&codecOpts, "rc", "vbr", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
       av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
       av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else if (encoder_name_ == "h264_qsv") {
-      av_dict_set(&codecOpts, "preset", "veryfast", 0);
-      av_dict_set(&codecOpts, "profile", "baseline", 0);
+      av_dict_set(&codecOpts, "preset", param.encode_preset.c_str(), 0);
+      av_dict_set(&codecOpts, "tune", param.encode_tune.c_str(), 0);
       av_dict_set(&codecOpts, "async_depth", "1", 0);
       av_dict_set(&codecOpts, "look_ahead", "0", 0);
       av_dict_set(&codecOpts, "ratecontrol", "vbr", 0);
       av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
       av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else if (encoder_name_ == "h264_amf") {
+      av_dict_set(&codecOpts, "preset", param.encode_preset.c_str(), 0);
+      av_dict_set(&codecOpts, "tune", param.encode_tune.c_str(), 0);
       av_dict_set(&codecOpts, "quality", "speed", 0);
       av_dict_set(&codecOpts, "rc", "vbr", 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
       av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
       av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else if (encoder_name_ == "h264_vaapi") {
-      av_dict_set(&codecOpts, "profile", "baseline", 0);
+      av_dict_set(&codecOpts, "preset", param.encode_preset.c_str(), 0);
+      av_dict_set(&codecOpts, "tune", param.encode_tune.c_str(), 0);
       av_dict_set(&codecOpts, "rc_mode", "VBR", 0);
       av_dict_set(&codecOpts, "bitrate", std::to_string(bitrate_).c_str(), 0);
       av_dict_set(&codecOpts, "maxrate", std::to_string(bitrate_ * 1.5).c_str(), 0);
     } else {
-      // Optimize for lower CPU usage while maintaining reasonable quality
-      // av_dict_set(&codecOpts, "preset", "veryfast", 0);
-      // av_dict_set(&codecOpts, "tune", "fastdecode", 0);
-      // av_dict_set(&codecOpts, "profile", "baseline", 0);
-
-      av_dict_set(&codecOpts, "tune", "zerolatency", 0);
-      av_dict_set(&codecOpts, "preset", "ultrafast", 0);
+      av_dict_set(&codecOpts, "preset", param.encode_preset.c_str(), 0);
+      av_dict_set(&codecOpts, "tune", param.encode_tune.c_str(), 0);
       av_dict_set(&codecOpts, "profile", "baseline", 0);
-      av_dict_set(&codecOpts, "level", "4", 0);
-      av_dict_set(&codecOpts, "refs", "1", 0);
-      av_dict_set(&codecOpts, "me_method", "dia", 0);
-      av_dict_set(&codecOpts, "subq", "1", 0);
-      av_dict_set(&codecOpts, "trellis", "0", 0);
-      av_dict_set(&codecOpts, "aq-mode", "0", 0);
-      av_dict_set(&codecOpts, "me_range", "8", 0);
-      av_dict_set(&codecOpts, "weightb", "0", 0);
-      av_dict_set(&codecOpts, "8x8dct", "0", 0);
-      av_dict_set(&codecOpts, "fast-pskip", "1", 0);
+      av_dict_set(&codecOpts, "level", "3.1", 0);
+
+      // Thread optimization for multiple encoders
+      av_dict_set(&codecOpts, "threads", "1", 0);          // Limit threads per encoder
+      av_dict_set(&codecOpts, "sliced-threads", "1", 0);   // Use sliced threading
+
+      // // Frame rate guarantee settings (minimal encoding complexity)
+      // av_dict_set(&codecOpts, "refs", "1", 0);             // Single reference frame
+      // av_dict_set(&codecOpts, "me_method", "dia", 0);      // Diamond search (fastest)
+      // av_dict_set(&codecOpts, "subq", "1", 0);              // Minimal subpixel refinement
+      // av_dict_set(&codecOpts, "trellis", "0", 0);           // Disable trellis quantization
+      // av_dict_set(&codecOpts, "aq-mode", "0", 0);           // Disable adaptive quantization
+      // av_dict_set(&codecOpts, "me_range", "4", 0);          // Small motion estimation range
+      // av_dict_set(&codecOpts, "weightb", "0", 0);           // Disable weighted B-frames
+      // av_dict_set(&codecOpts, "8x8dct", "0", 0);            // Disable 8x8 DCT
+      // av_dict_set(&codecOpts, "fast-pskip", "1", 0);        // Enable fast P-skip
+      //
+      // // Additional settings for frame rate guarantee
+      // av_dict_set(&codecOpts, "rc-lookahead", "0", 0);      // No lookahead for immediate encode
+      // av_dict_set(&codecOpts, "no-scenecut", "1", 0);       // Disable scene cut detection
+      // av_dict_set(&codecOpts, "bframes", "0", 0);           // No B-frames for simplicity
+      // av_dict_set(&codecOpts, "b-adapt", "0", 0);           // Disable B-frame adaptation
+      // av_dict_set(&codecOpts, "direct", "none", 0);         // Disable direct mode
+      // av_dict_set(&codecOpts, "no-cabac", "1", 0);          // Disable CABAC for lower CPU
+      // av_dict_set(&codecOpts, "no-deblock", "1", 0);        // Disable deblocking filter
+      //
+      // // Minimize internal buffering
+      // av_dict_set(&codecOpts, "sync-lookahead", "0", 0);    // Disable sync lookahead
     }
 
     if (avcodec_open2(codec_context_, codec_, &codecOpts) < 0) {
@@ -161,7 +176,7 @@ public:
       codec_context_->height, codec_context_->pix_fmt, 32);
 
     COLOG_INFO(
-      "H264 encoder initialized with bitrate: %d bps (%.2f Mbps)",
+      "[%s] encoder initialized with bitrate: %d bps (%.2f Mbps)", encoder_topic_.c_str(),
       bitrate_, bitrate_ / 1000000.0);
   }
 
@@ -185,52 +200,49 @@ public:
    *
    * @param img Input image in OpenCV Mat format (BGR, RGB, or grayscale)
    * @param timestamp Frame timestamp in MILISECONDS (used for PTS calculation)
+   * @return int 0 on success, AVERROR(EAGAIN) if buffer is full, negative on other errors
    *
    */
-  void send_frame(const cv::Mat & img, const int64_t & timestamp)
+  int send_frame(const cv::Mat & img, const int64_t & timestamp)
   {
     try {
-      received_ = true;
+      if (!received_) {
+        received_ = true;
+        first_frame_timestamp = timestamp;
+      }
+      last_frame_timestamp = timestamp;
       std::lock_guard<std::mutex> lock(mutex_);
 
       cv::Mat yuv_img;
 
-      // Optimize color space conversion to reduce CPU usage
       if (img.channels() == 1) {
         cv::Mat bgr_img;
         cv::cvtColor(img, bgr_img, cv::COLOR_GRAY2BGR);
         cv::cvtColor(bgr_img, yuv_img, cv::COLOR_BGR2YUV_I420);
       } else if (img.channels() == 3) {
-        // Direct BGR to YUV conversion
         cv::cvtColor(img, yuv_img, cv::COLOR_BGR2YUV_I420);
       } else if (img.channels() == 4) {
-        // Direct BGRA to YUV conversion (skip BGR intermediate step)
         cv::cvtColor(img, yuv_img, cv::COLOR_BGRA2YUV_I420);
       } else {
         COLOG_ERROR("Unsupported image channels: %d", img.channels());
-        return;
+        return AVERROR(EINVAL);
       }
 
-      // Optimize memory copy operations
       const int y_size = codec_context_->width * codec_context_->height;
       if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
         const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 
-        // Fast Y plane copy
         memcpy(frame_->data[0], yuv_img.data, y_size);
 
-        // Optimized UV interleaving
         const uint8_t * u_src = yuv_img.data + y_size;
         const uint8_t * v_src = yuv_img.data + y_size + uv_size;
         uint8_t * uv_dst = frame_->data[1];
 
-        // Unroll loop for better performance
         for (int i = 0; i < uv_size; i++) {
           uv_dst[i * 2] = u_src[i];
           uv_dst[i * 2 + 1] = v_src[i];
         }
       } else {
-        // Standard YUV420P format - batch copy
         const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
 
         memcpy(frame_->data[0], yuv_img.data, y_size);
@@ -242,10 +254,23 @@ public:
 
       const int ret = avcodec_send_frame(codec_context_, frame_);
       if (ret < 0) {
-        char err_buf[128];
-        av_strerror(ret, err_buf, sizeof(err_buf));
-        COLOG_WARN("send frame to encoder failed: %s", err_buf);
+        if (ret == AVERROR(EAGAIN)) {
+          ++send_eagain_count_;
+          COLOG_DEBUG(
+            "[%s] Encoder buffer full (EAGAIN), frame may be delayed",
+            encoder_topic_.c_str());
+          return ret;
+        } else {
+          char err_buf[128];
+          av_strerror(ret, err_buf, sizeof(err_buf));
+          COLOG_WARN(
+            "send frame to [%s] encoder failed: %s (error code: %d)",
+            encoder_topic_.c_str(), err_buf, ret);
+          return ret;
+        }
       }
+      ++frames_sent_;
+      return 0;
     } catch (const std::exception & e) {
       COLOG_ERROR("Exception in send_frame: %s", e.what());
       throw;
@@ -287,12 +312,39 @@ public:
 #endif
 
       av_packet_unref(&pkt);
+      ++packets_received_;
       return std::make_shared<CompressedVideo>(video_msg);
     } else {
-      // Always unref the packet, even on failure, to prevent memory leak
+      if (ret == AVERROR(EAGAIN)) {
+        ++recv_eagain_count_;
+        COLOG_DEBUG(
+          "[%s] encode_frame: EAGAIN - encoder needs more input before producing output",
+          encoder_topic_.c_str());
+      } else if (ret != AVERROR_EOF) {
+        char err_buf[128];
+        av_strerror(ret, err_buf, sizeof(err_buf));
+        COLOG_WARN(
+          "[%s] encode_frame failed: %s (error code: %d)",
+          encoder_topic_.c_str(), err_buf, ret);
+      }
       av_packet_unref(&pkt);
     }
     return nullptr;
+  }
+
+  void print_stats() const
+  {
+    COLOG_DEBUG(
+      "[%s] Sent: %lu, Output: %lu, Send_EAGAIN: %lu, Recv_EAGAIN: %lu, output FPS: %.2f",
+      encoder_topic_.c_str(),
+      frames_sent_.load(),
+      packets_received_.load(),
+      send_eagain_count_.load(),
+      recv_eagain_count_.load(),
+      frames_sent_ >
+      0 ? (packets_received_.load() * 1000.0 /
+      (last_frame_timestamp.load() - first_frame_timestamp.load())) : 0.0
+    );
   }
 
 private:
@@ -300,10 +352,20 @@ private:
   AVFrame * frame_ = nullptr;
   AVCodecContext * codec_context_ = nullptr;
   std::string encoder_name_;
+  std::string encoder_topic_;
   int bitrate_;
 
   std::mutex mutex_;
   std::atomic<bool> received_{false};
+
+  std::atomic<int64_t> first_frame_timestamp{0};
+  std::atomic<int64_t> last_frame_timestamp{0};
+
+  // Performance statistics
+  std::atomic<uint64_t> frames_sent_{0};
+  std::atomic<uint64_t> packets_received_{0};
+  std::atomic<uint64_t> send_eagain_count_{0};
+  std::atomic<uint64_t> recv_eagain_count_{0};
 };
 
 #endif  // UTILS__ENCODER_HPP_

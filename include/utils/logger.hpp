@@ -100,15 +100,16 @@ public:
       return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
-    if (level == "Debug") {
+    if (level == "Debug" || level == "DEBUG" || level == "debug") {
       current_level_ = LogLevel::DEBUG;
-    } else if (level == "Info") {
+    } else if (level == "Info" || level == "INFO" || level == "info") {
       current_level_ = LogLevel::INFO;
-    } else if (level == "Warn") {
+    } else if (level == "Warn" || level == "WARN" || level == "warn") {
       current_level_ = LogLevel::WARN;
-    } else if (level == "Error") {
+    } else if (level == "Error" || level == "ERROR" || level == "error") {
       current_level_ = LogLevel::ERROR;
     }
+
     current_level_string_ = level;
   }
 
