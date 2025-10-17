@@ -31,13 +31,17 @@ If the system environment variable contains `HOME`, the config file is located a
       "bitrate": 1600000,
       "encoder_name": "h264_nvenc",
       "input": "/camera_0/raw_image",
-      "output": "/camera_0/raw_image/h264"
+      "output": "/camera_0/raw_image/h264",
+      "encode_preset": "ultrafast",
+      "encode_tune": "zerolatency"
     },
     {
       "bitrate": 1600000,
       "encoder_name": "libx264",
       "input": "/camera_1/raw_image",
-      "output": "/camera_1/raw_image/h264"
+      "output": "/camera_1/raw_image/h264",
+      "encode_preset": "ultrafast",
+      "encode_tune": "zerolatency"
     }
   ]
 }
@@ -50,6 +54,33 @@ If the system environment variable contains `HOME`, the config file is located a
   * **encoder_name**: Encoder name, supports `h264_nvenc`, `h264_qsv`, `h264_amf`, `h264_vaapi`, and you can also use `libx264` to encode frames by CPU. If this field is missing in the configuration, `libx264` will be used for encoding
   * **input**: Input topic name
   * **output**: Output topic name
+  * **encode_preset**:
+  
+    | valid value                | encode speed      | CPU usage      | quality/encode rate           |
+    |:---------------------------|:------------------|:---------------|:------------------------------|
+    | **ultrafast**  *(default)* | 🚀 ultrafast      | 🟢 lowest      | 🔴 worst (highest bitrate)    |
+    | **superfast**              | 🚀 very fast      | 🟢 very low    | 🔴 very poor                  |
+    | **veryfast**               | ⚡ fast            | 🟢 low         | 🟠 slightly poor              |
+    | **faster**                 | fast              | 🟡 medium-low  | 🟡 average                    |
+    | **fast**                   | medium-fast       | 🟡 medium      | 🟢 acceptable                 |
+    | **medium**                 | balanced          | 🟠 medium-high | 🟢 recommended default        |
+    | **slow**                   | slow              | 🔴 high        | 🟢 good                       |
+    | **slower**                 | slower            | 🔴 high        | 🟢 better                     |
+    | **veryslow**               | very slow         | 🔴 highest     | 🟢 best compression           |
+    | **placebo**                | 💀 extremely slow | 🔴 very high   | 🟢 minimal additional benefit |
+  
+  * **encode_tune**:
+  
+    | Tune                        | Purpose                                                            | CPU usage               |
+    |:----------------------------|:-------------------------------------------------------------------|:------------------------|
+    | **film**                    | For high-quality film material (preserve details, noise reduction) | 🔴 slightly higher      |
+    | **animation**               | For animation (sharpen edges)                                      | 🔴 slightly higher      |
+    | **grain**                   | Preserve film grain (high complexity)                              | 🔴 significantly higher |
+    | **stillimage**              | For static images                                                  | 🟡 moderate             |
+    | **psnr / ssim**             | For quality testing (not recommended)                              | 🔴 slightly higher      |
+    | **fastdecode**              | For fast decoding (reduce B-frames etc.)                           | 🟢 lower                |
+    | **zerolatency** *(default)* | Low latency real-time transmission (remove buffering)              | 🟢 lower                |
+
 
 ## Online Configuration Modification
 **Online configuration modification requires coScout v1.1.8 or later**
@@ -64,6 +95,7 @@ If the system environment variable contains `HOME`, the config file is located a
   * Configuration validity
     * The configuration MUST contain the `topics_param` field, and this field must be of array type.
     * Elements in `topics_param` MUST have three fields: `input`, `output`, `bitrate`. `input` and `output` are strings, `bitrate` is an integer.
+    * `encoder_name`, `encode_preset` and `encode_tune` fields are optional. If these fields are not explicitly specified in `topics_param`, coEncoder will use default values for h264 encoding
 
 ## Compile OR deb install
 
