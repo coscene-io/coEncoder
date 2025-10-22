@@ -228,26 +228,49 @@ public:
         return AVERROR(EINVAL);
       }
 
-      const int y_size = codec_context_->width * codec_context_->height;
       if (codec_context_->pix_fmt == AV_PIX_FMT_NV12) {
-        const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
+        const uint8_t * y_src = yuv_img.data;
+        for (int i = 0; i < codec_context_->height; i++) {
+          memcpy(
+            frame_->data[0] + i * frame_->linesize[0],
+            y_src + i * codec_context_->width,
+            codec_context_->width);
+        }
 
-        memcpy(frame_->data[0], yuv_img.data, y_size);
+        const uint8_t * u_src = yuv_img.data + codec_context_->width * codec_context_->height;
+        const uint8_t * v_src = u_src + (codec_context_->width / 2) * (codec_context_->height / 2);
 
-        const uint8_t * u_src = yuv_img.data + y_size;
-        const uint8_t * v_src = yuv_img.data + y_size + uv_size;
-        uint8_t * uv_dst = frame_->data[1];
-
-        for (int i = 0; i < uv_size; i++) {
-          uv_dst[i * 2] = u_src[i];
-          uv_dst[i * 2 + 1] = v_src[i];
+        for (int i = 0; i < codec_context_->height / 2; i++) {
+          uint8_t * uv_dst = frame_->data[1] + i * frame_->linesize[1];
+          for (int j = 0; j < codec_context_->width / 2; j++) {
+            uv_dst[j * 2] = u_src[i * (codec_context_->width / 2) + j];
+            uv_dst[j * 2 + 1] = v_src[i * (codec_context_->width / 2) + j];
+          }
         }
       } else {
-        const int uv_size = (codec_context_->width / 2) * (codec_context_->height / 2);
+        const uint8_t * y_src = yuv_img.data;
+        for (int i = 0; i < codec_context_->height; i++) {
+          memcpy(
+            frame_->data[0] + i * frame_->linesize[0],
+            y_src + i * codec_context_->width,
+            codec_context_->width);
+        }
 
-        memcpy(frame_->data[0], yuv_img.data, y_size);
-        memcpy(frame_->data[1], yuv_img.data + y_size, uv_size);
-        memcpy(frame_->data[2], yuv_img.data + y_size + uv_size, uv_size);
+        const uint8_t * u_src = yuv_img.data + codec_context_->width * codec_context_->height;
+        for (int i = 0; i < codec_context_->height / 2; i++) {
+          memcpy(
+            frame_->data[1] + i * frame_->linesize[1],
+            u_src + i * (codec_context_->width / 2),
+            codec_context_->width / 2);
+        }
+
+        const uint8_t * v_src = u_src + (codec_context_->width / 2) * (codec_context_->height / 2);
+        for (int i = 0; i < codec_context_->height / 2; i++) {
+          memcpy(
+            frame_->data[2] + i * frame_->linesize[2],
+            v_src + i * (codec_context_->width / 2),
+            codec_context_->width / 2);
+        }
       }
 
       frame_->pts = timestamp;
