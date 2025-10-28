@@ -71,7 +71,8 @@ public:
     Logger::getInstance().set_log_dir(config_.log_directory_);
     Logger::getInstance().set_log_level(config_.log_level_);
 
-    Logger::getInstance().log_version_box("coEncoder " + coencoder::get_full_version_info(), LogLevel::INFO);
+    Logger::getInstance().log_version_box(
+      "coEncoder " + coencoder::get_full_version_info(), LogLevel::INFO);
     COLOG_INFO("config: \n%s", config_.print_config().c_str());
     update(config_);
 

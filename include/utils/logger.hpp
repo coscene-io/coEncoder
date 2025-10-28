@@ -120,24 +120,24 @@ public:
     current_level_ = level;
   }
 
-  void log_version_box(const std::string& version_info, LogLevel level = LogLevel::INFO) {
+  void log_version_box(const std::string & version_info, LogLevel level = LogLevel::INFO)
+  {
     size_t content_width = version_info.length();
     size_t box_width = content_width + 2;
-    
     std::string top_border = "┏";
     for (size_t i = 0; i < box_width; ++i) {
       top_border += "━";
     }
     top_border += "┓";
-    
+
     std::string content_line = "┃ " + version_info + " ┃";
-    
+
     std::string bottom_border = "┗";
     for (size_t i = 0; i < box_width; ++i) {
       bottom_border += "━";
     }
     bottom_border += "┛";
-    
+
     log(level, top_border);
     log(level, content_line);
     log(level, bottom_border);

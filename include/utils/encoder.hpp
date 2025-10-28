@@ -368,7 +368,7 @@ public:
       send_eagain_count_.load(),
       recv_eagain_count_.load(),
       frames_sent_ >
-      0 ? (packets_received_.load() * 1000.0 /(last_frame_ts - first_frame_ts)) : 0.0,
+      0 ? (packets_received_.load() * 1000.0 / (last_frame_ts - first_frame_ts)) : 0.0,
       last_frame_ts,
       first_frame_ts
     );

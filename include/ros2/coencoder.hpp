@@ -80,12 +80,14 @@ public:
     RCLCPP_INFO(this->get_logger(), "Loading config [%s] ...", config_file_path_.c_str());
     config_.load_config(config_file_path_);
 
-    RCLCPP_INFO(this->get_logger(), "Setting up logger, path: %s, level: %s",
+    RCLCPP_INFO(
+      this->get_logger(), "Setting up logger, path: %s, level: %s",
       config_.log_directory_.c_str(), config_.log_level_.c_str());
     Logger::getInstance().set_log_dir(config_.log_directory_);
     Logger::getInstance().set_log_level(config_.log_level_);
 
-    Logger::getInstance().log_version_box("coEncoder " + coencoder::get_full_version_info(), LogLevel::INFO);
+    Logger::getInstance().log_version_box(
+      "coEncoder " + coencoder::get_full_version_info(), LogLevel::INFO);
     COLOG_INFO("config: \n%s", config_.print_config().c_str());
 
     config_update_thread_ = std::thread(
