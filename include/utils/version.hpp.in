@@ -1,0 +1,29 @@
+#ifndef UTILS__VERSION_HPP_
+#define UTILS__VERSION_HPP_
+
+#include <string>
+
+namespace coencoder {
+
+// 版本号定义 - 由CMake自动生成
+const std::string VERSION = "@COENCODER_VERSION@";
+
+// Git提交哈希 - 由CMake自动生成
+const std::string GIT_COMMIT_HASH = "@GIT_COMMIT_HASH@";
+
+// 构建时间 - 由CMake自动生成
+const std::string BUILD_TIMESTAMP = "@BUILD_TIMESTAMP@";
+
+// 获取版本号
+inline std::string get_version() {
+  return VERSION;
+}
+
+// 获取完整版本信息
+inline std::string get_full_version_info() {
+  return VERSION + " (commit: " + GIT_COMMIT_HASH + ", built on: " + BUILD_TIMESTAMP + ")";
+}
+
+}  // namespace coencoder
+
+#endif  // UTILS__VERSION_HPP_

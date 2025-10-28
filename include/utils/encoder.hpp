@@ -53,7 +53,7 @@ public:
 #endif
 
     bitrate_ = param.bitrate;
-    encoder_topic_ = param.input_topic;
+    encoder_topic_ = param.output_topic;
     encoder_name_ = param.encoder_name;
     codec_ = avcodec_find_encoder_by_name(encoder_name_.c_str());
     if (!codec_) {
@@ -357,16 +357,20 @@ public:
 
   void print_stats() const
   {
+    const auto last_frame_ts = last_frame_timestamp.load();
+    const auto first_frame_ts = first_frame_timestamp.load();
     COLOG_DEBUG(
-      "[%s] Sent: %lu, Output: %lu, Send_EAGAIN: %lu, Recv_EAGAIN: %lu, output FPS: %.2f",
+      "📊  [%s] Sent: %lu, Output: %lu, Send_EAGAIN: %lu, Recv_EAGAIN: %lu, output FPS: %.2f, "
+      "last_frame_timestamp: %ld, first_frame_timestamp: %ld",
       encoder_topic_.c_str(),
       frames_sent_.load(),
       packets_received_.load(),
       send_eagain_count_.load(),
       recv_eagain_count_.load(),
       frames_sent_ >
-      0 ? (packets_received_.load() * 1000.0 /
-      (last_frame_timestamp.load() - first_frame_timestamp.load())) : 0.0
+      0 ? (packets_received_.load() * 1000.0 /(last_frame_ts - first_frame_ts)) : 0.0,
+      last_frame_ts,
+      first_frame_ts
     );
   }
 
