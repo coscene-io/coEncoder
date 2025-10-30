@@ -32,7 +32,7 @@ inline std::string get_version()
 inline std::string get_full_version_info()
 {
   return static_cast<std::string>(VERSION) +
-         " (commit: " + GIT_COMMIT_HASH + ", built on: " + BUILD_TIMESTAMP + ")";
+         " (commit: " + GIT_COMMIT_HASH + ", built on: " + BUILD_TIMESTAMP + "UTC)";
 }
 
 }  // namespace coencoder

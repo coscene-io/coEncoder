@@ -34,10 +34,8 @@ configure_file(
 
 # Find FFmpeg packages
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(AVFORMAT REQUIRED libavformat)
 pkg_check_modules(AVCODEC REQUIRED libavcodec)
 pkg_check_modules(AVUTIL REQUIRED libavutil)
-pkg_check_modules(SWSCALE REQUIRED libswscale)
 
 find_package(OpenCV REQUIRED)
 find_package(CURL REQUIRED)
@@ -84,9 +82,7 @@ if("$ENV{ROS_VERSION}" STREQUAL "1")
             ${catkin_LIBRARIES}
             ${OpenCV_LIBRARIES}
             ${AVCODEC_LIBRARIES}
-            ${AVFORMAT_LIBRARIES}
             ${AVUTIL_LIBRARIES}
-            ${SWSCALE_LIBRARIES}
             ${CURL_LIBRARIES}
     )
 elseif("$ENV{ROS_VERSION}" STREQUAL "2")
@@ -120,10 +116,8 @@ elseif("$ENV{ROS_VERSION}" STREQUAL "2")
 
     target_link_libraries(coencoder
             ${OpenCV_LIBRARIES}
-            ${AVFORMAT_LIBRARIES}
             ${AVCODEC_LIBRARIES}
             ${AVUTIL_LIBRARIES}
-            ${SWSCALE_LIBRARIES}
             ${CURL_LIBRARIES}
     )
 
