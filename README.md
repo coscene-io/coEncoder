@@ -6,10 +6,10 @@
 
 - Install dependencies
 ```bash
-sudo apt install libavcodec-dev libavutil-dev libopencv-dev libcurl4 ros-{ros_distro}-foxglove-msgs -y
+sudo apt install libavcodec-dev libavutil-dev libopencv-dev libcurl4 ros-${ROS_DISTRO}-foxglove-msgs -y
 ```
-## GPU Supported
-coencoder currently supports encoding using GPUs, currently supports the following encoders:
+## GPU Support
+coencoder supports hardware-accelerated encoding using the following encoders:
 ```C++
 "h264_nvenc",    // NVIDIA NVENC
 "h264_qsv",      // Intel Quick Sync
@@ -32,6 +32,7 @@ If the system environment variable contains `HOME`, the config file is located a
       "encoder_name": "h264_nvenc",
       "input": "/camera_0/raw_image",
       "output": "/camera_0/raw_image/h264",
+      "output_frame_rate": 10,
       "encode_preset": "ultrafast",
       "encode_tune": "zerolatency"
     },
@@ -40,6 +41,7 @@ If the system environment variable contains `HOME`, the config file is located a
       "encoder_name": "libx264",
       "input": "/camera_1/raw_image",
       "output": "/camera_1/raw_image/h264",
+      "output_frame_rate": 15,
       "encode_preset": "ultrafast",
       "encode_tune": "zerolatency"
     }
@@ -49,12 +51,13 @@ If the system environment variable contains `HOME`, the config file is located a
 * **enable_by_default**: Whether to enable encoding by default
 * **log_directory**: Log file path
 * **log_level**: Log level, possible values: Debug / Info / Warn / Error
-* **topics_param**: Array type, contains 3 fields
+* **topics_param**: Array type, contains 7 fields
   * **bitrate**: Output bitrate
-  * **encoder_name**: Encoder name, supports `h264_nvenc`, `h264_qsv`, `h264_amf`, `h264_vaapi`, and you can also use `libx264` to encode frames by CPU. If this field is missing in the configuration, `libx264` will be used for encoding
   * **input**: Input topic name
   * **output**: Output topic name
-  * **encode_preset**:
+  * **[optional param] encoder_name**: Encoder name, supports `h264_nvenc`, `h264_qsv`, `h264_amf`, `h264_vaapi`, and you can also use `libx264` to encode frames by CPU. (`libx264` for default)
+  * **[optional param] output_frame_rate**: output frame rate (0 for default, use original framerate)
+  * **[optional param] encode_preset**:
   
     | valid value                | encode speed      | CPU usage      | quality/encode rate           |
     |:---------------------------|:------------------|:---------------|:------------------------------|
@@ -69,7 +72,7 @@ If the system environment variable contains `HOME`, the config file is located a
     | **veryslow**               | very slow         | 🔴 highest     | 🟢 best compression           |
     | **placebo**                | 💀 extremely slow | 🔴 very high   | 🟢 minimal additional benefit |
   
-  * **encode_tune**:
+  * **[optional param] encode_tune**:
   
     | Tune                        | Purpose                                                            | CPU usage               |
     |:----------------------------|:-------------------------------------------------------------------|:------------------------|
@@ -95,38 +98,38 @@ If the system environment variable contains `HOME`, the config file is located a
   * Configuration validity
     * The configuration MUST contain the `topics_param` field, and this field must be of array type.
     * Elements in `topics_param` MUST have three fields: `input`, `output`, `bitrate`. `input` and `output` are strings, `bitrate` is an integer.
-    * `encoder_name`, `encode_preset` and `encode_tune` fields are optional. If these fields are not explicitly specified in `topics_param`, coEncoder will use default values for h264 encoding
+    * `output_frame_rate`, `encoder_name`, `encode_preset` and `encode_tune` fields are optional. If these fields are not explicitly specified in `topics_param`, coEncoder will use default values for h264 encoding
 
 ## Compile OR deb install
 
-*** You can install CoEncoder by compiling it yourself. Alternatively, we will also provide a .deb package for installation. ***
+**You can install CoEncoder by compiling it yourself or by using the provided .deb package.**
 - Compile 
   - ROS1
     ```bash
     # Copy the project into your ROS workspace
-    cp -r {this_repo} {your_ros_ws}/src/
+    cp -r ${THIS_REPO} ${YOUR_ROS_WS}/src/
     
     # Source ROS setup and build
-    source /opt/ros/{ros_distro}/setup.bash
+    source /opt/ros/${ROS_DISTRO}/setup.bash
   
-    cd {your_ros_ws}
+    cd ${YOUR_ROS_WS}
   
     catkin_make --pkg coencoder install
     ```
   - ROS2
     ```bash
     # Copy the project into your ROS workspace
-    cp -r {this_repo} {your_ros_ws}/src/
+    cp -r ${THIS_REPO} ${YOUR_ROS_WS}/src/
     # Source ROS setup and build
-    source /opt/ros/{ros_distro}/setup.bash
+    source /opt/ros/${ROS_DISTRO}/setup.bash
   
-    cd {your_ros_ws}
+    cd ${YOUR_ROS_WS}
     colcon build --packages-select coencoder    
     ```
     
 - deb Install
   ```bash
-    dpkg -i ros-{ros distro}-coencoder_latest_{system arch}.deb
+    dpkg -i ros-${ROS_DISTRO}-coencoder_latest_$(dpkg --print-architecture).deb
   ```
 
 ## RUN
@@ -134,23 +137,23 @@ If the system environment variable contains `HOME`, the config file is located a
 - ROS1
   ```bash
   # if install coencoder by Compile, source your workspace  
-  source {your_ros_ws}/install/setup.bash
+  source ${YOUR_ROS_WS}/install/setup.bash
   # if install coencoder by deb, source ros
-  source /opt/ros/{ros destro}/setup.bash
+  source /opt/ros/${ROS_DISTRO}/setup.bash
   
   roslaunch coencoder coencoder.launch
   # You can also use `rosrun` to start the node
-  rosrun coencoder coencoder --config-file {your_config_file_path}
+  rosrun coencoder coencoder --config-file ${CONFIG_FILE_PATH}
   ```
   
 - ROS2
   ```bash
   # if install coencoder by Compile, source your workspace  
-  source {your_ros_ws}/install/setup.bash
+  source ${YOUR_ROS_WS}/install/setup.bash
   # if install coencoder by deb, source ros
-  source /opt/ros/{ros destro}/setup.bash
+  source /opt/ros/${ROS_DISTRO}/setup.bash
   
   ros2 launch coencoder coencoder_launch.xml
   # You can also use `ros2 run` to start the node  
-  ros2 run coencoder coencoder -- --config-file {your_config_file_path}
+  ros2 run coencoder coencoder -- --config-file ${CONFIG_FILE_PATH}
   ```
