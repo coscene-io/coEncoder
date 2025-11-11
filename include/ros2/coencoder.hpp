@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <fcntl.h>
 #include <cstring>
+#include <sstream>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
@@ -46,6 +47,7 @@
 #include "utils/util.hpp"
 #include "utils/logger.hpp"
 #include "utils/curl_client.hpp"
+#include "utils/version.hpp"
 
 constexpr size_t DEFAULT_MIN_QOS_DEPTH = 1;
 constexpr size_t DEFAULT_MAX_QOS_DEPTH = 100;  // Increase QoS depth for high frame rate
@@ -57,7 +59,7 @@ class CoEncoder : public rclcpp::Node
 {
 public:
   explicit CoEncoder(const std::string & config_path)
-  : Node("coencoder")/*, thread_pool_(std::max(1u, std::thread::hardware_concurrency() / 2))*/
+  : Node("coencoder")
   {
     RCLCPP_INFO(this->get_logger(), "CoEncoder constructor started");
 
@@ -78,22 +80,26 @@ public:
     RCLCPP_INFO(this->get_logger(), "Loading config [%s] ...", config_file_path_.c_str());
     config_.load_config(config_file_path_);
 
-    RCLCPP_INFO(this->get_logger(), "Setting up logger...");
+    RCLCPP_INFO(
+      this->get_logger(), "Setting up logger, path: %s, level: %s",
+      config_.log_directory_.c_str(), config_.log_level_.c_str());
     Logger::getInstance().set_log_dir(config_.log_directory_);
     Logger::getInstance().set_log_level(config_.log_level_);
 
-    COLOG_INFO("============================== coEncoder started ==============================");
+    Logger::getInstance().log_version_box(
+      "coEncoder " + coencoder::get_full_version_info(), LogLevel::INFO);
     COLOG_INFO("config: \n%s", config_.print_config().c_str());
 
     config_update_thread_ = std::thread(
       [this]() {
         while (rclcpp::ok() && !shutdown_requested_) {
           try {
-            COLOG_DEBUG("-------------------------- Statistics --------------------------");
-            for (const auto & worker : encoder_workers_) {
-              worker.second->get_encoder().print_stats();
-            }
             update_config_from_http();
+            if (!encoder_workers_.empty()) {
+              for (const auto & worker : encoder_workers_) {
+                worker.second->get_encoder().print_stats();
+              }
+            }
           } catch (const std::exception & e) {
             COLOG_ERROR("Config update failed: %s", e.what());
           }

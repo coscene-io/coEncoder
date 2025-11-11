@@ -24,8 +24,9 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <dirent.h>
+#include <sstream>
+#include <iomanip>
 #include <utils/util.hpp>
-
 
 enum class LogLevel
 {
@@ -119,6 +120,29 @@ public:
     current_level_ = level;
   }
 
+  void log_version_box(const std::string & version_info, LogLevel level = LogLevel::INFO)
+  {
+    size_t content_width = version_info.length();
+    size_t box_width = content_width + 2;
+    std::string top_border = "┏";
+    for (size_t i = 0; i < box_width; ++i) {
+      top_border += "━";
+    }
+    top_border += "┓";
+
+    std::string content_line = "┃ " + version_info + " ┃";
+
+    std::string bottom_border = "┗";
+    for (size_t i = 0; i < box_width; ++i) {
+      bottom_border += "━";
+    }
+    bottom_border += "┛";
+
+    log(level, top_border);
+    log(level, content_line);
+    log(level, bottom_border);
+  }
+
 private:
   std::string log_dir_;
   std::mutex mutex_;
@@ -208,7 +232,6 @@ private:
     return std::string(buffer);
   }
 
-
   std::string get_log_file_name(const std::string & date) const
   {
     return log_dir_ + "coencoder_" + date + ".log";
@@ -232,7 +255,7 @@ inline std::string format_string(const char * file, int line, const char * msg)
 }
 
 template<typename ... Args>
-std::string format_string(const char * file, int line, const char * format, Args... args)
+std::string format_string(const char * file, int line, const char * format, Args ... args)
 {
   int size = snprintf(nullptr, 0, format, args ...) + 1;
   if (size <= 0) {

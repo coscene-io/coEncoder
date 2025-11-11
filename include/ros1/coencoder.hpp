@@ -26,6 +26,7 @@
 #include <vector>
 #include <sys/stat.h>
 #include <memory>
+#include <sstream>
 
 #include <ros/ros.h>
 #include <sensor_msgs/CompressedImage.h>
@@ -44,6 +45,7 @@
 #include "utils/encoder_worker.hpp"
 #include "utils/logger.hpp"
 #include "utils/thread_pool.hpp"
+#include "utils/version.hpp"
 
 class CoEncoder
 {
@@ -69,7 +71,8 @@ public:
     Logger::getInstance().set_log_dir(config_.log_directory_);
     Logger::getInstance().set_log_level(config_.log_level_);
 
-    COLOG_INFO("============================== coEncoder started ==============================");
+    Logger::getInstance().log_version_box(
+      "coEncoder " + coencoder::get_full_version_info(), LogLevel::INFO);
     COLOG_INFO("config: \n%s", config_.print_config().c_str());
     update(config_);
 
